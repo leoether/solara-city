@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SOLARA CITY — an open-world crime game</title>
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; background: #0a1826; font-family: 'Trebuchet MS', Verdana, sans-serif; }
+  #app { position: fixed; inset: 0; }
+  canvas { display: block; }
+  #hud { position: fixed; inset: 0; pointer-events: none; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.7); z-index: 5; }
+  .panel { background: rgba(8, 20, 32, 0.55); border-radius: 10px; padding: 8px 12px; }
+  #topleft { position: absolute; top: 12px; left: 12px; min-width: 230px; }
+  #health-bar { width: 200px; height: 12px; background: rgba(0,0,0,.55); border-radius: 6px; overflow: hidden; margin: 4px 0; }
+  #health-fill { height: 100%; width: 100%; background: linear-gradient(90deg, #37e08b, #7CFC00); }
+  #health-text { font-weight: bold; font-size: 14px; }
+  #money { font-size: 24px; font-weight: bold; color: #7dff9b; }
+  #wanted { position: absolute; top: 12px; right: 12px; font-size: 30px; letter-spacing: 4px; }
+  #mission { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); text-align: center; max-width: 560px; }
+  #mission-title { font-size: 17px; font-weight: bold; color: #ffd94a; letter-spacing: 1px; }
+  #objective { font-size: 14px; margin-top: 2px; }
+  #timer { font-size: 16px; font-weight: bold; color: #ff9d5c; }
+  #toast { position: absolute; top: 110px; left: 50%; transform: translateX(-50%); font-size: 17px; font-weight: bold; color: #ffe27a; background: rgba(8,20,32,.65); padding: 10px 18px; border-radius: 10px; transition: opacity .4s; max-width: 640px; text-align: center; }
+  #minimap { position: absolute; right: 12px; bottom: 12px; width: 180px; height: 180px; border: 2px solid rgba(255,255,255,.65); border-radius: 8px; background: rgba(10,24,38,.85); }
+  #speed { position: absolute; right: 14px; bottom: 200px; font-size: 20px; font-weight: bold; }
+  #hint { position: absolute; left: 50%; bottom: 90px; transform: translateX(-50%); font-size: 16px; font-weight: bold; background: rgba(8,20,32,.65); padding: 8px 16px; border-radius: 8px; }
+  #controls { position: absolute; left: 12px; bottom: 12px; font-size: 12.5px; line-height: 1.6; opacity: .92; }
+  .overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; background: linear-gradient(160deg, rgba(10,30,50,.82), rgba(60,20,40,.78)); color: #fff; z-index: 10; text-align: center; }
+  .overlay h1 { font-size: 64px; margin: 0; letter-spacing: 6px; color: #ffd94a; text-shadow: 0 4px 0 #b3541e, 0 8px 24px rgba(0,0,0,.6); }
+  .overlay h2 { font-size: 20px; margin: 6px 0 4px; color: #7dd8ff; letter-spacing: 3px; }
+  .overlay p { max-width: 620px; font-size: 16px; line-height: 1.55; margin: 10px 20px; }
+  .overlay .keys { font-size: 14px; line-height: 1.9; background: rgba(0,0,0,.35); border-radius: 10px; padding: 10px 22px; }
+  .bigbtn { pointer-events: auto; cursor: pointer; margin-top: 18px; font-size: 20px; font-weight: bold; letter-spacing: 2px; color: #10202f; background: linear-gradient(180deg, #ffd94a, #f0a500); border: none; border-radius: 12px; padding: 14px 42px; box-shadow: 0 6px 0 #a86e00, 0 10px 24px rgba(0,0,0,.5); }
+  .bigbtn:hover { filter: brightness(1.08); }
+  .bigbtn.secondary { background: linear-gradient(180deg, #9fd8ff, #5aa9e6); box-shadow: 0 6px 0 #2f6ea5, 0 10px 24px rgba(0,0,0,.5); font-size: 16px; padding: 10px 28px; }
+  .hidden { display: none !important; }
+  #crosshair { position: absolute; left: 50%; top: 50%; width: 18px; height: 18px; margin: -9px 0 0 -9px; font-size: 18px; line-height: 18px; text-align: center; color: rgba(255,255,255,.85); }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="hud">
+  <div id="topleft" class="panel">
+    <div id="health-text">♥ 100</div>
+    <div id="health-bar"><div id="health-fill"></div></div>
+    <div id="money">$0</div>
+  </div>
+  <div id="wanted">☆☆☆☆☆</div>
+  <div id="mission" class="panel">
+    <div id="mission-title">SOLARA CITY</div>
+    <div id="objective">Welcome to Solara.</div>
+    <div id="timer"></div>
+  </div>
+  <div id="toast"></div>
+  <div id="crosshair">+</div>
+  <div id="speed"></div>
+  <div id="hint" class="hidden"></div>
+  <div id="controls" class="panel">WASD move / drive &nbsp;·&nbsp; Mouse drag: camera &nbsp;·&nbsp; Click: shoot<br>E: steal / exit car &nbsp;·&nbsp; Shift: run &nbsp;·&nbsp; P: pause &nbsp;·&nbsp; M: mute</div>
+  <canvas id="minimap" width="180" height="180"></canvas>
+</div>
+<div id="start-screen" class="overlay">
+  <h1>SOLARA CITY</h1>
+  <h2>AN OPEN-WORLD CRIME GAME</h2>
+  <p>Rico just got off the bus with empty pockets and a borrowed jacket. Mama Lou runs this
+  sun-soaked city — four jobs stand between Rico and the title of <b>Solara Legend</b>.
+  Steal cars, outrun the Solara PD, deliver the package, and take the gold coupe home.</p>
+  <div class="keys">
+    <b>WASD</b> walk / drive &nbsp;·&nbsp; <b>Mouse drag</b> camera &nbsp;·&nbsp; <b>Click</b> shoot &nbsp;·&nbsp; <b>E</b> steal / exit car<br>
+    <b>Shift</b> run &nbsp;·&nbsp; <b>P</b> pause &nbsp;·&nbsp; <b>M</b> mute &nbsp;·&nbsp; Progress saves automatically
+  </div>
+  <button id="start-btn" class="bigbtn">▶ START ENGINE</button>
+  <button id="continue-btn" class="bigbtn secondary hidden">↻ CONTINUE — JOB <span id="continue-job">1</span></button>
+  <p style="font-size:12.5px; opacity:.75">A completely original game. No Rockstar characters, names, maps or assets.</p>
+</div>
+<div id="pause-screen" class="overlay hidden">
+  <h1 style="font-size:44px">PAUSED</h1>
+  <p>Solara waits for no one — except right now.</p>
+  <button id="resume-btn" class="bigbtn">▶ RESUME</button>
+</div>
+<div id="end-screen" class="overlay hidden">
+  <h1 id="end-title" style="font-size:52px">BUSTED</h1>
+  <p id="end-text"></p>
+  <button id="end-btn" class="bigbtn">↻ BACK ON THE STREETS</button>
+</div>
+<script src="vendor/three.min.js"></script>
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
