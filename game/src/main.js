@@ -249,7 +249,17 @@ function stealCar() {
     G.sound.click();
     return;
   }
-  const car = G.traffic.nearestStealable(p.x, p.y, 82);
+  // Mission 4: the gold coupe is the objective — if it is in reach, it is
+  // always the steal, even if another car happens to be a few px closer.
+  // (Without this, a traffic car parked beside the lot could be stolen
+  // instead and the mission would never advance.)
+  let car = null;
+  const m = G.missions.current;
+  if (m && m.kind === 'gold' && G.missions.stage === 'pickup' && G.missions.goldCar) {
+    const gc = G.missions.goldCar;
+    if (!gc.wrecked && Math.hypot(gc.x - p.x, gc.y - p.y) < 120) car = gc;
+  }
+  if (!car) car = G.traffic.nearestStealable(p.x, p.y, 82);
   if (!car) {
     if (G.time - G.lastStealToast > 1.5) {
       toast('Tidak ada mobil di dekatmu.', '#9aa5b1');

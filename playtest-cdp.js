@@ -218,8 +218,10 @@ try {
 
     // Mission 2: timed escape (headless rAF runs ~50% wall speed, so use
     // the raw timer and a 2s window instead of the ceiled display value).
+    // Keep driving during the wait: a stationary player at wanted 2 gets
+    // busted by design, which would end the run before the mission does.
     const t2 = (await state(cdp)).timeLeftRaw;
-    await sleep(2000);
+    await cdp.hold('KeyW', 'w', 2000);
     s = await state(cdp);
     log('mission 2: escape timer counts down', s.timeLeftRaw < t2 - 0.5, `timeLeftRaw ${t2} -> ${s.timeLeftRaw}`);
     await cdp.eval('window.SOLARA.teleportToTarget()');
@@ -228,17 +230,22 @@ try {
     log('mission 2: complete pays +$500 (total $800), mission 3 survive', s.cash === 800 && s.missionIndex === 2 && s.missionKind === 'survive', JSON.stringify({ cash: s.cash, missionIndex: s.missionIndex }));
 
     // Mission 3: survival timer ticks; complete via API to save wall time.
+    // Keep driving during the wait (wanted 3 cops bust a stationary car).
     const t3 = (await state(cdp)).timeLeftRaw;
-    await sleep(2000);
+    await cdp.hold('KeyW', 'w', 2000);
     s = await state(cdp);
     log('mission 3: survival timer counts down at wanted 3', s.timeLeftRaw < t3 - 0.5 && s.wanted === 3, `timeLeftRaw ${t3} -> ${s.timeLeftRaw}, wanted ${s.wanted}`);
-    await cdp.eval('window.SOLARA.completeCurrentMission()');
-    await sleep(600);
+    // Complete, then immediately break contact: the cops that converged
+    // during survival would bust the idle player in the post-complete beat.
+    await cdp.eval('window.SOLARA.completeCurrentMission(); window.SOLARA.teleportToRoad()');
+    await sleep(400);
     s = await state(cdp);
     log('mission 3: complete pays +$800 (total $1600), mission 4 gold', s.cash === 1600 && s.missionIndex === 3 && s.missionKind === 'gold', JSON.stringify({ cash: s.cash, missionIndex: s.missionIndex }));
 
     // Mission 4: go to the lot, steal the gold coupe with real E, deliver it.
-    await cdp.eval('window.SOLARA.teleportToTarget()');
+    // Stop the car first: E refuses to exit above 60 speed, and a teleported
+    // car keeps its old speed (the M3 survival drive leaves it moving).
+    await cdp.eval('window.SOLARA.teleportToTarget(); window.SOLARA.setCarSpeed(0);');
     await sleep(400);
     // Step out of the current car first if still driving it.
     s = await state(cdp);
