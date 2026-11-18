@@ -214,7 +214,7 @@ class Game {
       this.missions = new MissionChain();
       this.resetWorld(1);
     }
-    this.missions.startMission();
+    this.missions.startMission(this.police);
     this.updateBeacon();
     this.showHint('WASD to move — find a car and press E', 4);
   }
@@ -231,7 +231,12 @@ class Game {
 
   nearestEnterableCar() {
     const all = [...this.parkedCars, ...this.traffic.cars];
-    if (this.goldCar) all.push(this.goldCar);
+    // the gold coupe is the job — when it is within reach, E always takes it,
+    // even if a traffic car happens to be a step closer on the intersection.
+    if (this.goldCar) {
+      const gd = Math.hypot(this.goldCar.x - this.player.x, this.goldCar.z - this.player.z);
+      if (gd < 3.6) return this.goldCar;
+    }
     let best = null;
     let bestD = 3.6;
     for (const c of all) {
@@ -345,6 +350,7 @@ class Game {
   }
 
   step(dt) {
+    this.frames = (this.frames || 0) + 1;
     const p = this.player;
     if (this.state === 'title') {
       this.titleAngle += dt * 0.05;
@@ -416,6 +422,11 @@ class Game {
       this.endScreen('busted');
       return;
     }
+    // any lethal damage (cops, crashes) ends the run as WASTED
+    if (p.health <= 0) {
+      this.endScreen('wasted');
+      return;
+    }
     // slow heal when clean
     if (this.police.wanted === 0 && p.health < 100) p.heal(2 * dt);
     // missions
@@ -424,14 +435,14 @@ class Game {
     const res = this.missions.step(dt, p, this.police);
     if (res === 'complete') {
       this.audio.jingle();
-      this.missions.complete(p);
+      this.missions.complete(p, this.police);
       this.save();
       if (this.missions.done) {
         this.endScreen('complete');
         return;
       }
     } else if (res === 'failed') {
-      this.missions.fail();
+      this.missions.fail(this.police);
     }
     this.updateBeacon();
     if (this.beacon.visible) {
@@ -470,6 +481,8 @@ class Game {
 
 // ---- boot ----
 const game = new Game();
+// Exposed for debugging and automated playtests (read-only handle to the live game).
+window.__solara = game;
 const params = new URLSearchParams(window.location.search);
 const shot = params.get('shot');
 if (shot && SHOT_NAMES.includes(shot)) {

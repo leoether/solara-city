@@ -66,12 +66,15 @@ export class MissionChain {
     if (m.id === 2 && !this.pickedUp) return m.pickup;
     return m.target;
   }
-  startMission() {
+  startMission(police) {
     const m = this.current;
     if (!m) return;
     this.pickedUp = false;
     this.timer = m.timer || 0;
     this.surviveLeft = m.survive || 0;
+    // Hot Pursuit opens with the heat already on — otherwise the survival
+    // timer could never run.
+    if (m.setWanted && police) police.setWanted(m.setWanted);
     this.toast = `JOB ${m.id}: ${m.title} — ${m.giver}: "${m.brief}"`;
     this.toastTime = 6;
   }
@@ -107,7 +110,7 @@ export class MissionChain {
     if (d < 7) return 'complete';
     return null;
   }
-  complete(player) {
+  complete(player, police) {
     const m = this.current;
     player.money += m.reward;
     this.toast = `JOB DONE: ${m.title} — +$${m.reward}`;
@@ -118,14 +121,14 @@ export class MissionChain {
       this.toast = 'SOLARA LEGEND — all four jobs done. The city is yours, Rico.';
       this.toastTime = 8;
     } else {
-      this.startMission();
+      this.startMission(police);
     }
     return m.reward;
   }
-  fail() {
+  fail(police) {
     const m = this.current;
     this.toast = `JOB FAILED: ${m.title} — Mama Lou is not happy. Try again.`;
     this.toastTime = 5;
-    this.startMission();
+    this.startMission(police);
   }
 }
