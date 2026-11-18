@@ -1,17 +1,36 @@
-# Convert /tmp/shot-*.png to JPEG <=256KiB in screenshots/ (names from shots.json).
-import json, os
+#!/usr/bin/env python3
+"""Convert the headless-shell PNG screenshots in screenshots/ to JPEG (quality 82,
+dropping quality until each file is <= 250 KiB) and delete the PNG originals.
+Run from the build dir:  python3 convert-shots.py
+"""
+import sys
+from pathlib import Path
+
 from PIL import Image
-mapping = {'cover': '1-chase.jpg', 'street': '2-street.jpg', 'police': '3-police.jpg', 'mission': '4-mission.jpg'}
-out = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'screenshots')
-os.makedirs(out, exist_ok=True)
-for name, fname in mapping.items():
-    src = f'/tmp/shot-{name}.png'
-    dst = os.path.join(out, fname)
-    im = Image.open(src).convert('RGB')
-    q = 88
-    while q >= 40:
-        im.save(dst, 'JPEG', quality=q, optimize=True)
-        if os.path.getsize(dst) <= 262144:
-            break
-        q -= 8
-    print(fname, os.path.getsize(dst), 'bytes q=', q, im.size)
+
+SHOTS = Path(__file__).resolve().parent / "screenshots"
+LIMIT = 250 * 1024
+
+
+def main() -> int:
+    pngs = sorted(SHOTS.glob("*.png"))
+    if not pngs:
+        print("no PNG screenshots found in", SHOTS)
+        return 1
+    for png in pngs:
+        img = Image.open(png).convert("RGB")
+        out = png.with_suffix(".jpg")
+        quality = 82
+        while quality >= 40:
+            img.save(out, "JPEG", quality=quality, optimize=True)
+            if out.stat().st_size <= LIMIT:
+                break
+            quality -= 6
+        print(f"{out.name}: {out.stat().st_size // 1024} KiB @ quality {quality} "
+              f"(was {png.stat().st_size // 1024} KiB PNG)")
+        png.unlink()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

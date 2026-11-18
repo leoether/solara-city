@@ -1,5 +1,5 @@
 // vehicles.js — car meshes, arcade driving physics and traffic AI that loops the road grid.
-import { CITY, GAME, clamp, angleLerp } from './config.js';
+import { CITY, GAME, clamp } from './config.js';
 import { mulberry32, pick, range } from './random.js';
 import { isOnRoad } from './world.js';
 
@@ -23,7 +23,6 @@ export function makeCarMesh(color, isPolice = false) {
     w.position.set(wx, 0.42, wz);
     g.add(w);
   }
-  // headlights
   const lightMat = new THREE.MeshLambertMaterial({ color: 0xfff6c9, emissive: 0x777744 });
   for (const wx of [-0.6, 0.6]) {
     const h = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.18, 0.1), lightMat);
@@ -43,7 +42,6 @@ export function makeCarMesh(color, isPolice = false) {
     g.userData.lightRed = red;
     g.userData.lightBlue = blue;
   }
-  // blob shadow
   const shadow = new THREE.Mesh(
     new THREE.PlaneGeometry(2.6, 5),
     new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.25 }),
@@ -81,7 +79,7 @@ export class Car {
   remove(scene) { scene.remove(this.mesh); }
 }
 
-/** Arcade driving for the player's car. input: {up,down,left,right}. */
+/** Arcade driving for the player's car. input: {up, down, left, right}. */
 export function drivePlayerCar(car, input, dt) {
   const forward = input.up ? 1 : 0;
   const back = input.down ? 1 : 0;
@@ -95,7 +93,6 @@ export function drivePlayerCar(car, input, dt) {
   car.mesh.rotation.y = car.heading;
   car.mesh.position.x += Math.sin(car.heading) * car.speed * dt;
   car.mesh.position.z += Math.cos(car.heading) * car.speed * dt;
-  // body lean
   car.mesh.rotation.z = -steer * 0.05 * clamp(Math.abs(car.speed) / 15, 0, 1);
 }
 
@@ -120,7 +117,6 @@ export class Traffic {
   }
   step(dt, colliders) {
     for (const car of this.cars) {
-      // car ahead on the same lane? slow down.
       let target = car.cruise;
       for (const other of this.cars) {
         if (other === car || other.axis !== car.axis || other.dir !== car.dir) continue;
@@ -135,7 +131,6 @@ export class Traffic {
       car.speed += clamp(target - car.speed, -14 * dt, 8 * dt);
       const nx = car.x + (car.axis === 'x' ? car.dir * car.speed * dt : 0);
       const nz = car.z + (car.axis === 'z' ? car.dir * car.speed * dt : 0);
-      // reached the city edge or an intersection: maybe turn.
       const atEdge = car.axis === 'x' ? Math.abs(nx) > 128 : Math.abs(nz) > 128;
       const atCross = CITY.ROADS.some((r) => Math.abs((car.axis === 'x' ? nx : nz) - r) < 0.6);
       if (atEdge || (atCross && this.rng() < 0.02)) {
@@ -144,7 +139,6 @@ export class Traffic {
           car.heading += Math.PI;
           car.mesh.rotation.y = car.heading;
         } else {
-          // turn onto the crossing road
           const crossRoad = (car.axis === 'x' ? nz : nx);
           const snapped = CITY.ROADS.reduce((a, r) => (Math.abs(r - crossRoad) < Math.abs(a - crossRoad) ? r : a), CITY.ROADS[0]);
           if (car.axis === 'x') { car.setPos(car.x, snapped, 0); car.axis = 'z'; }
@@ -157,7 +151,6 @@ export class Traffic {
       car.mesh.position.x = nx;
       car.mesh.position.z = nz;
       car.mesh.rotation.y = car.heading;
-      // keep off buildings (should not happen on roads, but be safe)
       for (const b of colliders) {
         const p = { x: car.x, z: car.z };
         if (p.x > b.minX - 2 && p.x < b.maxX + 2 && p.z > b.minZ - 2 && p.z < b.maxZ + 2) {

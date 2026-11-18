@@ -117,10 +117,10 @@ async function main() {
     const drove = await holdUntil('KeyW', 'w', 87, async () => {
       const s = await state();
       return s && Math.hypot(s.x - before.x, s.z - before.z) > 8 && s.speed > 3 ? s : null;
-    }, 60000, 'car moves >8m'); // ~20 frames needed at ~1 fps under SwiftShader
+    }, 60000, 'car moves >8m');
     check('holding W drives the car (arcade physics)', !!drove, drove ? `moved to ${drove.x},${drove.z} speed ${drove.speed}` : 'car never got moving');
 
-    // finish mission 1 by driving into the garage marker (8m out, heading north)
+    // Finish mission 1 by driving into the garage marker (8m out, heading north).
     await evalJs(`__solara.player.car.setPos(-60,-112,Math.PI); __solara.player.car.speed=6; __solara.player.x=-60; __solara.player.z=-112;`);
     const st4 = await holdUntil('KeyW', 'w', 87, async () => { const s = await state(); return s && s.mi === 1 ? s : null; }, 30000, 'mission 1 completes');
     check('mission 1 completes: +$300, mission 2 starts', st4 && st4.money === 300, JSON.stringify(st4));

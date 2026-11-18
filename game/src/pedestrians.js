@@ -66,7 +66,7 @@ export class Pedestrians {
       });
     }
   }
-  /** Step walkers. danger = {x,z,radius,active} makes nearby peds flee. */
+  /** Step walkers. danger = {x, z, radius, active} makes nearby peds flee. */
   step(dt, danger) {
     for (const p of this.peds) {
       if (p.down) {
@@ -104,12 +104,10 @@ export class Pedestrians {
       p.mesh.position.z += vz * dt;
       const heading = Math.atan2(vx, vz);
       if (vx !== 0 || vz !== 0) p.mesh.rotation.y = heading;
-      // walk cycle
       p.walkPhase += dt * (p.fleeing ? 11 : 6);
       const swing = Math.sin(p.walkPhase) * 0.5;
       p.mesh.userData.legL.rotation.x = swing;
       p.mesh.userData.legR.rotation.x = -swing;
-      // turn at intersections / edges, keep on sidewalks
       const along = p.axis === 'x' ? p.mesh.position.x : p.mesh.position.z;
       if (Math.abs(along) > 128) p.dir *= -1;
       else if (!p.fleeing && CITY.ROADS.some((r) => Math.abs(along - r) < 0.5) && this.rng() < 0.004) {

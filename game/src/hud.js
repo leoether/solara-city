@@ -51,11 +51,9 @@ export class HUD {
     c.clearRect(0, 0, S, S);
     c.fillStyle = 'rgba(10, 24, 38, 0.85)';
     c.fillRect(0, 0, S, S);
-    // ocean
     c.fillStyle = '#1d6fa8';
     const [, oy] = toMap(0, 150);
     c.fillRect(0, oy, S, S - oy);
-    // blocks
     c.fillStyle = '#3d4a5c';
     for (const bx of [-90, -30, 30, 90]) {
       for (const bz of [-90, -30, 30, 90]) {
@@ -63,7 +61,6 @@ export class HUD {
         c.fillRect(x, y, 46 * scale, 46 * scale);
       }
     }
-    // roads
     c.strokeStyle = '#8b98a8';
     c.lineWidth = 5;
     for (const r of CITY.ROADS) {
@@ -86,19 +83,16 @@ export class HUD {
     for (const cop of game.police.cars) blip(cop.x, cop.z, '#ff4444', 3.5);
     for (const cop of game.police.cops) blip(cop.mesh.position.x, cop.mesh.position.z, '#ff8888', 2.5);
     if (game.goldCar) blip(game.goldCar.x, game.goldCar.z, '#ffd700', 4);
-    // player arrow (rotates with heading)
     const [px, py] = toMap(game.player.x, game.player.z);
     const h = game.player.driving ? game.player.car.heading : game.player.heading;
     c.save();
     c.translate(px, py);
-    c.rotate(Math.atan2(Math.sin(h), Math.cos(h)) * 0 + h * 0); // map is north-up; draw triangle pointing along heading
     c.rotate(-h + Math.PI);
     c.fillStyle = '#37e08b';
     c.beginPath();
     c.moveTo(0, -7); c.lineTo(5, 6); c.lineTo(-5, 6); c.closePath();
     c.fill();
     c.restore();
-    // north + view cone
     c.fillStyle = '#fff';
     c.font = 'bold 11px sans-serif';
     c.fillText('N', 6, 14);

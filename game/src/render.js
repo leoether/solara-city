@@ -39,7 +39,7 @@ export class Render {
     const cy = height + Math.sin(this.smoothPitch) * dist * 0.7;
     this.camera.position.set(cx, Math.max(cy, 1.6), cz);
     this.camera.lookAt(player.x, player.driving ? 1.6 : 1.5, player.z);
-    // keep the camera out of buildings: clamp inside the city shell
+    // Keep the camera out of buildings: clamp inside the city shell.
     this.camera.position.x = clamp(this.camera.position.x, -170, 170);
     this.camera.position.z = clamp(this.camera.position.z, -170, 260);
   }

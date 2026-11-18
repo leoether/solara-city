@@ -67,7 +67,7 @@ export class Player {
   exitCar() {
     if (!this.car) return;
     this.driving = false;
-    // step out to the side of the car
+    // Step out to the side of the car.
     const side = Math.cos(this.car.heading);
     const sideX = Math.sin(this.car.heading);
     this.x = this.car.x + sideX * 2.2;

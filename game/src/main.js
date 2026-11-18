@@ -163,7 +163,7 @@ class Game {
       if (keyMap[e.code] !== undefined) this.input[keyMap[e.code]] = false;
       if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') this.input.run = false;
     });
-    // mouse drag orbits the camera; a short click shoots.
+    // Mouse drag orbits the camera; a short click shoots.
     let dragging = false;
     let downX = 0;
     let downY = 0;
@@ -231,7 +231,7 @@ class Game {
 
   nearestEnterableCar() {
     const all = [...this.parkedCars, ...this.traffic.cars];
-    // the gold coupe is the job — when it is within reach, E always takes it,
+    // The gold coupe is the job — when it is within reach, E always takes it,
     // even if a traffic car happens to be a step closer on the intersection.
     if (this.goldCar) {
       const gd = Math.hypot(this.goldCar.x - this.player.x, this.goldCar.z - this.player.z);
@@ -255,7 +255,6 @@ class Game {
     }
     const car = this.nearestEnterableCar();
     if (!car) return;
-    // stealing a parked/traffic/gold car draws heat
     this.player.enterCar(car);
     this.audio.chime();
     if (car.isGold) {
@@ -279,7 +278,6 @@ class Game {
   shoot() {
     if (this.state !== 'play' || this.player.driving) return;
     this.audio.ensure();
-    // aim: from the camera through the screen centre, out 30m
     const dir = new THREE.Vector3();
     this.render.camera.getWorldDirection(dir);
     const aimX = this.player.x + dir.x * 30;
@@ -381,13 +379,11 @@ class Game {
       p.z = clamp(p.z, -145, 210);
       p.car.mesh.position.x = p.x;
       p.car.mesh.position.z = p.z;
-      // running over pedestrians
       const hits = this.peds.knockDown(p.x, p.z, 2.6);
       if (hits > 0 && Math.abs(p.car.speed) > 8) {
         this.police.addWanted(1);
         this.showHint('You ran someone over! (+1 ★)', 3);
       }
-      // police cars ram the player car
       for (const pc of this.police.cars) {
         if (Math.hypot(pc.x - p.x, pc.z - p.z) < 3.4) {
           p.car.speed *= 0.55;
@@ -397,7 +393,6 @@ class Game {
       p.stepOnFoot(this.input, dt, this.world.colliders);
     }
     this.traffic.step(dt, this.world.colliders);
-    // pedestrians flee from a fast car or gunfire
     const danger = {
       x: p.x, z: p.z,
       radius: p.driving ? 14 : 9,
@@ -406,7 +401,7 @@ class Game {
     this.peds.step(dt, danger);
     this.police.step(dt, p, this.world.colliders);
     this.combat.step(dt);
-    // cops shoot when close and wanted
+    // Cops shoot when close and wanted.
     if (this.police.wanted > 0 && !p.driving) {
       this.copShootTimer -= dt;
       const near = this.police.nearestPoliceDist(p);
@@ -422,14 +417,11 @@ class Game {
       this.endScreen('busted');
       return;
     }
-    // any lethal damage (cops, crashes) ends the run as WASTED
     if (p.health <= 0) {
       this.endScreen('wasted');
       return;
     }
-    // slow heal when clean
     if (this.police.wanted === 0 && p.health < 100) p.heal(2 * dt);
-    // missions
     const m = this.missions.current;
     if (m && m.id === 4 && !this.goldCar) this.spawnGoldCar(60, 60);
     const res = this.missions.step(dt, p, this.police);
@@ -449,14 +441,11 @@ class Game {
       this.beacon.userData.gem.rotation.y += dt * 2;
       this.beacon.userData.gem.position.y = 5 + Math.sin(performance.now() / 300) * 0.6;
     }
-    // audio
     this.audio.setEngine(p.driving ? Math.abs(p.car.speed) / 27 : 0, p.driving);
     this.audio.setSiren(this.police.wanted > 0, dt);
-    // camera + HUD
     this.render.follow(p, dt);
     this.hud.update(this);
     this.render.draw();
-    // contextual hint
     const hint = document.getElementById('hint');
     if (!p.driving && this.nearestEnterableCar() && this.missions.toastTime <= 0) {
       hint.textContent = 'Press E to steal this car';
@@ -490,7 +479,7 @@ if (shot && SHOT_NAMES.includes(shot)) {
   document.getElementById('hud').style.display = 'block';
   game.state = 'shot';
   stageShot(shot, game);
-  // frozen frame: keep drawing the staged scene so the screenshot is deterministic.
+  // Frozen frame: keep drawing the staged scene so the screenshot is deterministic.
   const drawFrozen = () => {
     game.render.draw();
     requestAnimationFrame(drawFrozen);

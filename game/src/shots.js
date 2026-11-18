@@ -1,6 +1,6 @@
 // shots.js — deterministic screenshot scenes (?shot=<name>&seed=1).
-// Each scene stages the real game state (real traffic, real police, real HUD) and steps the
-// world forward a fixed number of steps, so the same seed always gives the same frame.
+// Each scene stages the real game state (real traffic, real police, real HUD) and steps
+// the world forward a fixed number of steps, so the same seed always gives the same frame.
 import { Car } from './vehicles.js';
 import { clamp } from './config.js';
 
@@ -34,7 +34,7 @@ export function stageShot(name, game) {
     p.enterCar(car);
     p.camYaw = Math.PI / 2;
     g.player.money = 800;
-    // police cars in pursuit: two interceptors ahead (visible, head-on) + one behind.
+    // Police cars in pursuit: two interceptors ahead (visible, head-on) + one behind.
     // spawnedFar must be cleared or the first police.step teleports them away.
     const spots = [[-18, -3.5], [-8, 4], [-72, 0]];
     g.police.cars.forEach((pc, i) => {
@@ -62,7 +62,6 @@ export function stageShot(name, game) {
     p.mesh.position.set(p.x, 0, p.z);
     p.mesh.rotation.y = p.heading;
     g.player.money = 300;
-    // a couple of traffic cars passing the intersection
     g.traffic.cars[0].setPos(-30, 0, Math.PI / 2);
     g.traffic.cars[0].speed = 8;
     g.traffic.cars[1].setPos(30, 0, -Math.PI / 2);
@@ -90,7 +89,6 @@ export function stageShot(name, game) {
       pc.speed = 6;
       pc.spawnedFar = false;
     });
-    // one police car visible ahead, closing in on Rico
     if (g.police.cars[0]) {
       g.police.cars[0].setPos(-2, -12, -2.36);
       g.police.cars[0].speed = 5;
@@ -101,7 +99,7 @@ export function stageShot(name, game) {
       cop.placed = true;
     });
     stepWorld(g, 30);
-    // muzzle flash mid-shot
+    // Muzzle flash mid-shot.
     g.combat.flash.position.set(p.x + 1.2, 1.25, p.z + 1.2);
     g.combat.flash.visible = true;
     g.combat.flashTime = 10;

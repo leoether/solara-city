@@ -1,8 +1,7 @@
 // police.js — wanted level, police car + foot-cop pursuit, busted/wasted rules.
-import { clamp } from './config.js';
+import { CITY, clamp } from './config.js';
 import { Car } from './vehicles.js';
 import { makePedMesh } from './pedestrians.js';
-import { CITY } from './config.js';
 
 export class Police {
   constructor(scene) {
@@ -47,7 +46,7 @@ export class Police {
     }
     while (this.cops.length > wantCops) this.scene.remove(this.cops.pop().mesh);
   }
-  /** Spawn a unit on a road near (x,z) but not on top of the player. */
+  /** Spawn a unit on a road near (x, z) but not on top of the player. */
   placeNear(unit, px, pz, dist) {
     const road = CITY.ROADS[Math.floor(Math.random() * CITY.ROADS.length)];
     const along = px + (Math.random() < 0.5 ? -1 : 1) * dist;
@@ -61,13 +60,11 @@ export class Police {
     this.flash += dt;
     const px = player.x;
     const pz = player.z;
-    // light bar flash
     for (const car of this.cars) {
       const on = Math.floor(this.flash * 6) % 2 === 0;
       if (car.mesh.userData.lightRed) car.mesh.userData.lightRed.material.emissive.setHex(on ? 0xff0000 : 0x220000);
       if (car.mesh.userData.lightBlue) car.mesh.userData.lightBlue.material.emissive.setHex(on ? 0x0000ff : 0x000022);
     }
-    // spawn freshly-added units at a distance
     for (const car of this.cars) {
       if (car.spawnedFar) {
         car.spawnedFar = false;
@@ -80,7 +77,7 @@ export class Police {
         this.placeNear(cop, px, pz, 30 + Math.random() * 15);
       }
     }
-    // pursuit: police cars chase with road-ignoring seek + building push-out
+    // Pursuit: police cars chase with road-ignoring seek + building push-out.
     for (const car of this.cars) {
       const dx = px - car.x;
       const dz = pz - car.z;
@@ -102,7 +99,6 @@ export class Police {
           car.heading += 0.9;
         }
       }
-      // stuck? teleport back onto a road near the player
       const moved = Math.hypot(car.x - car.lastX, car.z - car.lastZ);
       if (moved < 0.4) car.stuckTime += dt;
       else car.stuckTime = 0;
@@ -113,12 +109,9 @@ export class Police {
         this.placeNear(car, px, pz, 45);
         car.speed = 8;
       }
-      // ramming the player's car slows it; touching the player on foot busts
-      if (!player.driving && d < 2.2) {
-        this.bustedTimer += dt;
-      }
+      if (!player.driving && d < 2.2) this.bustedTimer += dt;
     }
-    // foot cops chase the player on foot
+    // Foot cops chase the player on foot.
     for (const cop of this.cops) {
       const dx = px - cop.mesh.position.x;
       const dz = pz - cop.mesh.position.z;
@@ -136,7 +129,7 @@ export class Police {
     if (player.driving || this.nearestPoliceDist(player) > 3) {
       if (this.bustedTimer > 0) this.bustedTimer = Math.max(0, this.bustedTimer - dt * 2);
     }
-    // wanted decay when quiet and unseen
+    // Wanted decays when quiet and unseen.
     if (this.wanted > 0) {
       const near = this.nearestPoliceDist(player);
       if (near > 55) {

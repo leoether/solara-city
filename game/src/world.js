@@ -1,5 +1,6 @@
-// world.js — builds the sun-soaked city of Solara: road grid, buildings, palms, lamps,
-// beach + ocean, sky and light. All procedural, no external assets. Deterministic per seed.
+// world.js — builds the sun-soaked city of Solara: road grid, buildings, palms,
+// lamps, beach + ocean, sky and light. All procedural, no external assets.
+// Deterministic per seed.
 import { CITY } from './config.js';
 import { mulberry32, pick, range, int } from './random.js';
 
@@ -26,7 +27,7 @@ function windowTexture() {
 
 export function buildCity(scene, seed = 1) {
   const rng = mulberry32(seed);
-  const colliders = []; // building AABBs {minX,maxX,minZ,maxZ}
+  const colliders = []; // building AABBs {minX, maxX, minZ, maxZ}
   const group = new THREE.Group();
   scene.add(group);
 
@@ -63,7 +64,6 @@ export function buildCity(scene, seed = 1) {
       walk.position.set(horizontal ? 0 : r, -0.02, horizontal ? r : 0);
       if (!horizontal) walk.rotation.z = Math.PI / 2;
       group.add(walk);
-      // centre dashes
       for (let t = -140; t <= 140; t += 12) {
         const dash = new THREE.Mesh(new THREE.PlaneGeometry(5, 0.7), dashMat);
         dash.rotation.x = -Math.PI / 2;
@@ -99,7 +99,6 @@ export function buildCity(scene, seed = 1) {
           roof.scale.set(w + 0.6, 0.5, d + 0.6);
           roof.position.set(x, h + 0.25, z);
           group.add(roof);
-          // rooftop AC box on taller towers
           if (h > 20) {
             const ac = new THREE.Mesh(boxGeo, roofMat);
             ac.scale.set(3, 1.6, 3);
@@ -169,7 +168,7 @@ export function buildCity(scene, seed = 1) {
     }
   }
 
-  // Beach (south) + ocean.
+  // Beach (south) + ocean + boardwalk strip.
   const sand = new THREE.Mesh(
     new THREE.PlaneGeometry(420, 60),
     new THREE.MeshLambertMaterial({ color: 0xead9a7 }),
@@ -184,7 +183,6 @@ export function buildCity(scene, seed = 1) {
   ocean.rotation.x = -Math.PI / 2;
   ocean.position.set(0, -0.3, 360);
   group.add(ocean);
-  // boardwalk strip
   const board = new THREE.Mesh(
     new THREE.PlaneGeometry(420, 8),
     new THREE.MeshLambertMaterial({ color: 0xa9805a }),
@@ -196,7 +194,7 @@ export function buildCity(scene, seed = 1) {
   return { group, colliders, rng };
 }
 
-/** True when (x,z) is on a road surface (drivable). */
+/** True when (x, z) is on a road surface (drivable). */
 export function isOnRoad(x, z) {
   const on = (v) => CITY.ROADS.some((r) => Math.abs(v - r) <= CITY.ROAD_W / 2);
   return on(x) || on(z);

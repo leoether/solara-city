@@ -22,7 +22,7 @@ export class Combat {
       this.light.intensity = 0;
     }
   }
-  /** Shoot from the player toward aim point (world x,z at y~1.2). Returns what was hit. */
+  /** Shoot from the player toward an aim point (world x, z at y ~1.2). Returns what was hit. */
   shoot(player, aimX, aimZ, targets) {
     if (this.cooldown > 0) return null;
     this.cooldown = 0.28;
@@ -33,7 +33,6 @@ export class Combat {
     const len = Math.hypot(dx, dz) || 1;
     const nx = dx / len;
     const nz = dz / len;
-    // muzzle flash at the gun
     const mx = ox + nx * 1.1;
     const mz = oz + nz * 1.1;
     this.flash.position.set(mx, 1.25, mz);
@@ -41,7 +40,7 @@ export class Combat {
     this.flashTime = 0.07;
     this.light.position.set(mx, 1.4, mz);
     this.light.intensity = 2.2;
-    // nearest target within a narrow cone along the shot
+    // Nearest target inside a narrow cone along the shot.
     let best = null;
     let bestD = 60;
     for (const t of targets) {
@@ -58,7 +57,7 @@ export class Combat {
     }
     return { hit: best, dist: bestD, from: { x: mx, z: mz }, dir: { x: nx, z: nz } };
   }
-  /** Melee punch: anything within 2.2m in front takes a hit. */
+  /** Melee punch: anything within 2.2 m in front takes a hit. */
   punch(player, targets) {
     if (this.cooldown > 0) return null;
     this.cooldown = 0.4;

@@ -1,10 +1,10 @@
-// SOLARA CITY — shared constants and helpers.
+// config.js — shared constants and small geometry helpers for SOLARA CITY.
 // Original open-world crime game for make.fun gta6-01. No Rockstar assets, names or maps.
 export const CITY = {
   ROAD_SPACING: 60,
   ROADS: [-120, -60, 0, 60, 120],
   ROAD_W: 14,
-  HALF: 150, // city playable extent (roads run -120..120, beach beyond +z)
+  HALF: 150, // playable extent; roads run -120..120, beach beyond +z
   BLOCK: 46,
 };
 
@@ -37,7 +37,7 @@ export function dist2(ax, az, bx, bz) {
   const dz = az - bz;
   return dx * dx + dz * dz;
 }
-/** Push a circle (x,z,r) out of an axis-aligned box {minX,maxX,minZ,maxZ}. Returns true if pushed. */
+/** Push a circle (x, z, r) out of an axis-aligned box. Returns true when pushed. */
 export function resolveCircleAABB(p, r, box) {
   const cx = clamp(p.x, box.minX, box.maxX);
   const cz = clamp(p.z, box.minZ, box.maxZ);
@@ -50,7 +50,7 @@ export function resolveCircleAABB(p, r, box) {
     p.x = cx + (dx / d) * r;
     p.z = cz + (dz / d) * r;
   } else {
-    // centre inside the box: push out along the smallest penetration axis
+    // Centre inside the box: escape along the shallowest penetration axis.
     const pl = p.x - box.minX + r;
     const pr = box.maxX - p.x + r;
     const pt = p.z - box.minZ + r;

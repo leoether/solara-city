@@ -90,7 +90,7 @@ export class MissionChain {
     if (m.survive) {
       if (police.wanted >= 3) this.surviveLeft -= dt;
       if (this.surviveLeft <= 0 && this.target) {
-        // survived: now just reach the safehouse
+        // Survived: now just reach the safehouse.
       }
     }
     const t = this.target;

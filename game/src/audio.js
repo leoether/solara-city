@@ -16,7 +16,6 @@ export class AudioSynth {
       const AC = window.AudioContext || window.webkitAudioContext;
       if (!AC) return false;
       this.ctx = new AC();
-      // engine hum
       this.engineOsc = this.ctx.createOscillator();
       this.engineOsc.type = 'sawtooth';
       this.engineOsc.frequency.value = 55;
@@ -29,7 +28,6 @@ export class AudioSynth {
       lp.connect(this.engineGain);
       this.engineGain.connect(this.ctx.destination);
       this.engineOsc.start();
-      // siren
       this.sirenOsc = this.ctx.createOscillator();
       this.sirenOsc.type = 'sine';
       this.sirenOsc.frequency.value = 700;

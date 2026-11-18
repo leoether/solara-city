@@ -1,4 +1,5 @@
-// Deterministic RNG (mulberry32) so the city, traffic and every ?shot= scene are reproducible.
+// random.js — deterministic RNG (mulberry32) so the city, traffic and every
+// ?shot= scene reproduce exactly from the same seed.
 export function mulberry32(seed) {
   let a = seed >>> 0;
   return function () {

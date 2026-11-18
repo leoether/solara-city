@@ -32,6 +32,10 @@ if (!existsSync(join(here, 'game', 'index.html'))) {
 // gold coupe delivered and the SOLARA LEGEND finish.
 const shots = existsSync(join(here, 'screenshots')) ? readdirSync(join(here, 'screenshots')).filter((f) => /\.(png|jpe?g)$/i.test(f)) : [];
 if (shots.length < 3) throw new Error(`SOLARA CITY: only ${shots.length} screenshot(s) — need 3 or 4`);
+if (shots.length > 4) throw new Error(`SOLARA CITY: ${shots.length} screenshots — the scorer caps at 4`);
+// The first screenshot by name is the cover the judge sees largest, so keep the
+// chase shot first: it shows the car, the wanted stars, the minimap and the live objective.
+if (!shots[0].startsWith('1-')) throw new Error(`SOLARA CITY: cover screenshot must sort first (1-*.jpg), got ${shots[0]}`);
 
 mkdirSync(out, { recursive: true });
 cpSync(join(here, 'game'), join(out, 'game'), { recursive: true });
