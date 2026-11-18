@@ -15,10 +15,15 @@ import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-game.ts';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
-const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+// An empty MAKEFUN_OUTPUT_DIR (e.g. `MAKEFUN_OUTPUT_DIR= node main.ts`)
+// would otherwise make mkdirSync/cpSync fail with a cryptic ENOENT.
+const out = (process.env.MAKEFUN_OUTPUT_DIR ?? '/output').trim() || '/output';
 const gameDir = join(here, 'game');
 const shotsDir = join(here, 'screenshots');
 
+if (!existsSync(gameDir)) {
+  throw new Error(`game/ is missing — expected at ${gameDir}`);
+}
 if (!existsSync(join(gameDir, 'index.html'))) {
   throw new Error('game/index.html is missing — the build is incomplete');
 }
