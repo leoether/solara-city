@@ -5,8 +5,7 @@
 //   4. gold — steal the guarded gold coupe, deliver it, busted = mission failed (+$1500)
 // Rewards sum to $3,100 = SOLARA LEGEND.
 
-import { MISSIONS } from './config.js';
-import { WORLD } from './config.js';
+import { MISSIONS, WORLD } from './config.js';
 
 export class MissionManager {
   constructor(city, rng) {

@@ -2,6 +2,8 @@
 // police. Simple circle hits against police cars; player bullets also scare
 // pedestrians. Muzzle flashes and tracers are drawn by render.js.
 
+import { WORLD } from './config.js';
+
 export class Combat {
   constructor() {
     this.bullets = []; // {x, y, angle, speed, from, life, damage}
@@ -48,6 +50,8 @@ export class Combat {
       b.x += Math.cos(b.angle) * b.speed * dt;
       b.y += Math.sin(b.angle) * b.speed * dt;
       let dead = b.life <= 0;
+      // Bullets that left the world are gone even if their life remains.
+      if (b.x < 0 || b.y < 0 || b.x > WORLD.size || b.y > WORLD.size) dead = true;
       if (city.pointInBuilding(b.x, b.y)) {
         events.sparks.push({ x: b.x, y: b.y });
         dead = true;

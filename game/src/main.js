@@ -3,7 +3,7 @@
 // updateWanted(level), missions, rendering, audio, save. Written fresh for
 // round 3; no code reused from earlier rounds.
 
-import { WORLD, SAVE_KEY, MISSIONS, LEGEND_CASH, KEYS } from './config.js';
+import { WORLD, SAVE_KEY, MISSIONS, LEGEND_CASH, KEYS, GAME_VERSION } from './config.js';
 import { mulberry32, clamp } from './random.js';
 import { City } from './world.js';
 import { Traffic } from './vehicles.js';
@@ -475,7 +475,7 @@ canvas.addEventListener('click', (e) => {
 
 // ---- public API: driving hooks for the headless playtest + ?shot= staging ----
 G.api = {
-  version: '3.0.0',
+  version: GAME_VERSION,
   start: () => startGame(null),
   continueGame: () => startGame(loadSave()),
   state() {

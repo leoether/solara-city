@@ -23,7 +23,6 @@ export class City {
 
   _buildBlocks() {
     const rng = this.rng;
-    const gap = WORLD.roadGap;
     const half = WORLD.roadWidth / 2;
     // Blocks sit between roads. Each block: buildings, or a park, or a plaza.
     for (let bx = 0; bx < this.roadsX.length; bx++) {

@@ -66,6 +66,7 @@ export class Renderer {
   }
 
   spawnFlash(x, y) {
+    if (this.particles.length > 420) return;
     this.particles.push({
       kind: 'flash', x, y, vx: 0, vy: 0, life: 0.08, maxLife: 0.08, size: 26,
     });

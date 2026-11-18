@@ -3,7 +3,7 @@
 // top-down rectangles with headlights, drawn by render.js.
 
 import { WORLD, PLAYER } from './config.js';
-import { mulberry32, pick, range } from './random.js';
+import { mulberry32, pick, range, angleDiff } from './random.js';
 
 export const CAR_COLORS = [
   '#c0392b', '#2980b9', '#7f8c8d', '#16a085', '#8e44ad',
@@ -118,9 +118,7 @@ export class Traffic {
       const p = city.nearestRoadPoint(c.x, c.y);
       if (p) {
         const want = Math.atan2(p.y - c.y, p.x - c.x);
-        let diff = want - c.angle;
-        while (diff > Math.PI) diff -= Math.PI * 2;
-        while (diff < -Math.PI) diff += Math.PI * 2;
+        const diff = angleDiff(c.angle, want);
         // Only correct when the road ahead is the one we are on.
         if (Math.abs(diff) < 1.2) c.angle += diff * Math.min(1, dt * 1.4);
       }

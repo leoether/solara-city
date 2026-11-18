@@ -4,7 +4,7 @@
 
 export function applyShot(G, name) {
   const api = G.api;
-  if (!api) return false;
+  if (!api || !G.renderer) return false;
   if (name === 'start') {
     G.mode = 'boot';
     return true;

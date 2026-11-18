@@ -37,6 +37,7 @@ export class SoundFX {
 
   _tone(freq, dur, type, vol, slideTo) {
     if (!this.ctx || !this.enabled) return;
+    freq = Math.max(20, freq);
     try {
       const t = this.ctx.currentTime;
       const osc = this.ctx.createOscillator();

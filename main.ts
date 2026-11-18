@@ -10,7 +10,7 @@
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-game.ts';
 
@@ -18,6 +18,12 @@ const here = fileURLToPath(new URL('.', import.meta.url));
 // An empty MAKEFUN_OUTPUT_DIR (e.g. `MAKEFUN_OUTPUT_DIR= node main.ts`)
 // would otherwise make mkdirSync/cpSync fail with a cryptic ENOENT.
 const out = (process.env.MAKEFUN_OUTPUT_DIR ?? '/output').trim() || '/output';
+// Refuse an output dir inside this repo: cpSync(gameDir, out/game) would
+// copy the repo into itself and grow without bound.
+const outResolved = resolve(out);
+if (outResolved === resolve(here) || outResolved.startsWith(resolve(here) + sep)) {
+  throw new Error(`MAKEFUN_OUTPUT_DIR must be outside the repo, got ${out}`);
+}
 const gameDir = join(here, 'game');
 const shotsDir = join(here, 'screenshots');
 
@@ -66,6 +72,7 @@ console.log(`SOLARA CITY v3 handed in: ${shots.length} screenshots, dossier writ
 const dossierPath = join(out, 'dossier.json');
 const dossier = JSON.parse(readFileSync(dossierPath, 'utf8'));
 if (!dossier || typeof dossier !== 'object') throw new Error('dossier.json did not parse to an object');
+if (statSync(dossierPath).size === 0) throw new Error('dossier.json is empty');
 let gameFiles = 0;
 const walk = (dir) => {
   for (const f of readdirSync(dir, { withFileTypes: true })) {

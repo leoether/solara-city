@@ -2,7 +2,7 @@
 // scale with the wanted level. They ram the player; at wanted 2+ they shoot.
 // A wrecked police car (hp 0) stops and despawns.
 
-import { WORLD, PLAYER } from './config.js';
+import { WORLD } from './config.js';
 import { angleDiff, clamp } from './random.js';
 import { Car } from './vehicles.js';
 

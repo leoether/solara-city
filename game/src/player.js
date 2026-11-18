@@ -3,7 +3,7 @@
 // live here; the state machine itself lives in main.js.
 
 import { WORLD, PLAYER } from './config.js';
-import { clamp, angleDiff } from './random.js';
+import { clamp } from './random.js';
 
 export class Player {
   constructor(city, x, y) {

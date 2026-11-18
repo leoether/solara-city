@@ -2,7 +2,7 @@
 // stars (animated, colour by level), mission tracker, speed, minimap, toasts,
 // and the boot / pause / busted / wasted / legend overlays with click buttons.
 
-import { WANTED_COLORS, WORLD, MISSIONS, LEGEND_CASH } from './config.js';
+import { WANTED_COLORS, WORLD, LEGEND_CASH } from './config.js';
 
 function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath();

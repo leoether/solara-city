@@ -10,6 +10,8 @@ export const WORLD = {
 
 export const SAVE_KEY = 'solara-city-save-v3';
 
+export const GAME_VERSION = '3.0.0';
+
 export const PLAYER = {
   walkSpeed: 185,
   accel: 430,          // car acceleration px/s^2

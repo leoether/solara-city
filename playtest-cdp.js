@@ -278,7 +278,7 @@ try {
     await cdp.eval('window.SOLARA.start()');
     await sleep(400);
     await cdp.eval('window.SOLARA.giveCar(); window.SOLARA.setWanted(1); window.SOLARA.setCarSpeed(0); window.SOLARA.placePoliceNear(1, 55);');
-    await sleep(4000); // bust needs 1.1s game-time; headless runs ~50% speed
+    await sleep(4000); // bust needs 1.6s game-time; headless runs ~50% speed
     s = await state(cdp);
     log('busted: glued cop busts a stopped player', s.mode === 'busted', JSON.stringify(s.mode));
     await cdp.tap('Enter', 'Enter');
@@ -330,7 +330,7 @@ try {
     const shotFlag = await cdp.eval('window.__solaraShot');
     const size = await cdp.shot(join(here, 'screenshots', file), 80);
     if (scene === 'chase') await cdp.key('KeyW', 'w', 'keyUp');
-    const ok = size <= 262144;
+    const ok = size <= 262144 && shotFlag === scene;
     console.log(`${ok ? 'PASS' : 'FAIL'}  shot ${scene}: ${file} ${size} bytes (cap 262144), flag=${shotFlag}`);
     if (!ok) process.exitCode = 1;
     cdp.ws.close();

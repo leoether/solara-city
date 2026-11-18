@@ -1,1 +1,1 @@
-[{"name":"1-chase.jpg","query":"?shot=chase&seed=1"},{"name":"2-reward.jpg","query":"?shot=reward&seed=1"},{"name":"3-legend.jpg","query":"?shot=legend&seed=1"},{"name":"4-shootout.jpg","query":"?shot=shootout&seed=1"}]
+[{"label":"chase","name":"1-chase.jpg","query":"?shot=chase&seed=1"},{"label":"reward","name":"2-reward.jpg","query":"?shot=reward&seed=1"},{"label":"legend","name":"3-legend.jpg","query":"?shot=legend&seed=1"},{"label":"shootout","name":"4-shootout.jpg","query":"?shot=shootout&seed=1"}]

@@ -22,7 +22,9 @@ export function range(rng, min, max) {
 }
 
 export function rangeInt(rng, min, max) {
-  return Math.floor(range(rng, min, max + 1));
+  const lo = Math.min(min, max);
+  const hi = Math.max(min, max);
+  return Math.floor(range(rng, lo, hi + 1));
 }
 
 export function clamp(v, lo, hi) {

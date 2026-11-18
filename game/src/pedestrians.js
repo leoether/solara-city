@@ -2,7 +2,7 @@
 // pause, and flee from gunshots and speeding cars.
 
 import { WORLD } from './config.js';
-import { mulberry32, pick, range } from './random.js';
+import { mulberry32, pick, range, clamp } from './random.js';
 
 const SHIRT = ['#e74c3c', '#3498db', '#f1c40f', '#9b59b6', '#1abc9c', '#ecf0f1', '#e67e22'];
 
@@ -60,6 +60,9 @@ export class Pedestrians {
         p.angle = Math.atan2(p.fleeY / len, p.fleeX / len);
         p.x += Math.cos(p.angle) * 150 * dt;
         p.y += Math.sin(p.angle) * 150 * dt;
+        // Fleeing pedestrians stay inside the world.
+        p.x = clamp(p.x, 30, WORLD.size - 30);
+        p.y = clamp(p.y, 30, WORLD.size - 30);
         if (p.stateT <= 0) { p.state = 'walk'; p.stateT = range(this.rng, 2, 5); }
       }
       if (p.state === 'walk') {
