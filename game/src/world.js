@@ -1,211 +1,157 @@
-// world.js — builds the sun-soaked city of Solara: road grid, buildings, palms,
-// lamps, beach + ocean, sky and light. All procedural, no external assets.
-// Deterministic per seed.
-import { CITY } from './config.js';
-import { mulberry32, pick, range, int } from './random.js';
+// SOLARA CITY v3 — the city: a fixed-seed procedural grid of roads, blocks,
+// buildings with lit windows, parks, trees and street lamps. Night palette.
+// Layout is deterministic (seed 1337) so playtests and screenshots repeat.
 
-const BUILDING_COLORS = [0xf2d8a7, 0xe8a87c, 0xa8d8ea, 0xf7cac9, 0xc5e1a5, 0xd1c4e9, 0xffccbc, 0xb2dfdb, 0xf5f0e6, 0xf0b429];
+import { WORLD, COLORS } from './config.js';
+import { mulberry32, pick, range, rangeInt } from './random.js';
 
-function windowTexture() {
-  const c = document.createElement('canvas');
-  c.width = 128;
-  c.height = 256;
-  const g = c.getContext('2d');
-  g.fillStyle = '#e8e2d4';
-  g.fillRect(0, 0, 128, 256);
-  for (let y = 12; y < 244; y += 22) {
-    for (let x = 10; x < 118; x += 20) {
-      const lit = Math.random() < 0.28;
-      g.fillStyle = lit ? '#ffe9a8' : '#2e4053';
-      g.fillRect(x, y, 12, 14);
-    }
-  }
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
-
-export function buildCity(scene, seed = 1) {
-  const rng = mulberry32(seed);
-  const colliders = []; // building AABBs {minX, maxX, minZ, maxZ}
-  const group = new THREE.Group();
-  scene.add(group);
-
-  // Sky, fog and sun.
-  scene.background = new THREE.Color(0x8ec9e8);
-  scene.fog = new THREE.Fog(0xbfd9e8, 220, 620);
-  const sun = new THREE.DirectionalLight(0xfff1cf, 1.25);
-  sun.position.set(140, 200, 80);
-  scene.add(sun);
-  scene.add(new THREE.HemisphereLight(0xbfe3ff, 0x8a7a5a, 0.85));
-
-  // Ground: dry warm grass/sand base.
-  const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(900, 900),
-    new THREE.MeshLambertMaterial({ color: 0xbfae85 }),
-  );
-  ground.rotation.x = -Math.PI / 2;
-  ground.position.y = -0.05;
-  group.add(ground);
-
-  // Roads: dark asphalt strips + pale sidewalks, with dashed centre lines.
-  const roadMat = new THREE.MeshLambertMaterial({ color: 0x3c3c44 });
-  const walkMat = new THREE.MeshLambertMaterial({ color: 0xcfc3a5 });
-  const dashMat = new THREE.MeshLambertMaterial({ color: 0xf7d774 });
-  for (const r of CITY.ROADS) {
-    for (const horizontal of [true, false]) {
-      const road = new THREE.Mesh(new THREE.PlaneGeometry(300, CITY.ROAD_W), roadMat);
-      road.rotation.x = -Math.PI / 2;
-      road.position.set(horizontal ? 0 : r, 0, horizontal ? r : 0);
-      if (!horizontal) road.rotation.z = Math.PI / 2;
-      group.add(road);
-      const walk = new THREE.Mesh(new THREE.PlaneGeometry(300, CITY.ROAD_W + 8), walkMat);
-      walk.rotation.x = -Math.PI / 2;
-      walk.position.set(horizontal ? 0 : r, -0.02, horizontal ? r : 0);
-      if (!horizontal) walk.rotation.z = Math.PI / 2;
-      group.add(walk);
-      for (let t = -140; t <= 140; t += 12) {
-        const dash = new THREE.Mesh(new THREE.PlaneGeometry(5, 0.7), dashMat);
-        dash.rotation.x = -Math.PI / 2;
-        dash.position.set(horizontal ? t : r, 0.01, horizontal ? r : t);
-        if (!horizontal) dash.rotation.z = Math.PI / 2;
-        group.add(dash);
-      }
-    }
+export class City {
+  constructor(seed = 1337) {
+    this.seed = seed;
+    this.rng = mulberry32(seed);
+    this.roadsX = [];
+    this.roadsY = [];
+    for (let x = WORLD.roadGap; x < WORLD.size; x += WORLD.roadGap) this.roadsX.push(x);
+    for (let y = WORLD.roadGap; y < WORLD.size; y += WORLD.roadGap) this.roadsY.push(y);
+    this.buildings = [];
+    this.parks = [];
+    this.trees = [];
+    this.lamps = [];
+    this.spawn = { x: WORLD.roadGap, y: WORLD.roadGap };
+    this._buildBlocks();
   }
 
-  // Buildings: 16 blocks, 4 per block, varied heights and sun-soaked colours.
-  const winTex = windowTexture();
-  const mats = BUILDING_COLORS.map(
-    (c) => new THREE.MeshLambertMaterial({ color: c, map: winTex }),
-  );
-  const boxGeo = new THREE.BoxGeometry(1, 1, 1);
-  const roofMat = new THREE.MeshLambertMaterial({ color: 0x5a4a3a });
-  const blockCentres = [-90, -30, 30, 90];
-  for (const bx of blockCentres) {
-    for (const bz of blockCentres) {
-      for (const ox of [-11, 11]) {
-        for (const oz of [-11, 11]) {
-          const w = range(rng, 15, 19);
-          const d = range(rng, 15, 19);
-          const h = pick(rng, [8, 10, 12, 14, 18, 22, 26, 32, 40]) * range(rng, 0.9, 1.15);
-          const x = bx + ox;
-          const z = bz + oz;
-          const b = new THREE.Mesh(boxGeo, mats[int(rng, 0, mats.length - 1)]);
-          b.scale.set(w, h, d);
-          b.position.set(x, h / 2, z);
-          group.add(b);
-          const roof = new THREE.Mesh(boxGeo, roofMat);
-          roof.scale.set(w + 0.6, 0.5, d + 0.6);
-          roof.position.set(x, h + 0.25, z);
-          group.add(roof);
-          if (h > 20) {
-            const ac = new THREE.Mesh(boxGeo, roofMat);
-            ac.scale.set(3, 1.6, 3);
-            ac.position.set(x + 3, h + 1.1, z - 2);
-            group.add(ac);
+  _buildBlocks() {
+    const rng = this.rng;
+    const gap = WORLD.roadGap;
+    const half = WORLD.roadWidth / 2;
+    // Blocks sit between roads. Each block: buildings, or a park, or a plaza.
+    for (let bx = 0; bx < this.roadsX.length; bx++) {
+      for (let by = 0; by < this.roadsY.length; by++) {
+        const x0 = this.roadsX[bx] + half + WORLD.blockPad;
+        const y0 = this.roadsY[by] + half + WORLD.blockPad;
+        const x1 = (bx + 1 < this.roadsX.length ? this.roadsX[bx + 1] : WORLD.size) - half - WORLD.blockPad;
+        const y1 = (by + 1 < this.roadsY.length ? this.roadsY[by + 1] : WORLD.size) - half - WORLD.blockPad;
+        if (x1 - x0 < 90 || y1 - y0 < 90) continue;
+        const roll = rng();
+        if (roll < 0.16) {
+          // Park: grass, paths, trees, benches.
+          const park = { x: x0, y: y0, w: x1 - x0, h: y1 - y0, trees: [] };
+          const n = rangeInt(rng, 5, 9);
+          for (let i = 0; i < n; i++) {
+            park.trees.push({ x: range(rng, x0 + 14, x1 - 14), y: range(rng, y0 + 14, y1 - 14), r: range(rng, 9, 15) });
           }
-          colliders.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2 });
+          this.parks.push(park);
+          for (const t of park.trees) this.trees.push(t);
+          continue;
+        }
+        // 1-3 buildings per block, varied footprint and height colour.
+        const nB = roll < 0.55 ? 1 : roll < 0.85 ? 2 : 3;
+        for (let i = 0; i < nB; i++) {
+          const bw = range(rng, 90, Math.max(100, (x1 - x0) / nB - 18));
+          const bh = range(rng, 90, Math.max(100, (y1 - y0) / nB - 18));
+          const bx0 = range(rng, x0, Math.max(x0 + 1, x1 - bw));
+          const by0 = range(rng, y0, Math.max(y0 + 1, y1 - bh));
+          const roof = pick(rng, [COLORS.buildingRoof, COLORS.buildingRoof2, COLORS.buildingRoof3]);
+          const floors = rangeInt(rng, 2, 6);
+          const windows = [];
+          const cols = Math.max(2, Math.floor(bw / 34));
+          const rows = Math.max(1, Math.floor(bh / 34));
+          for (let c = 0; c < cols; c++) {
+            for (let r = 0; r < rows; r++) {
+              windows.push({ dx: 12 + c * 34, dy: 12 + r * 34, lit: rng() < 0.45, warm: rng() });
+            }
+          }
+          this.buildings.push({ x: bx0, y: by0, w: bw, h: bh, roof, floors, windows });
+        }
+        // A couple of street trees on the block corners.
+        for (let i = 0; i < 2; i++) {
+          this.trees.push({ x: range(rng, x0, x1), y: range(rng, y0, y1), r: range(rng, 8, 13) });
         }
       }
     }
-  }
-
-  // Landmark: the Solara Tower (tallest, gold glass) at the north-east block.
-  const tower = new THREE.Mesh(
-    boxGeo,
-    new THREE.MeshLambertMaterial({ color: 0xf7c948, map: winTex, emissive: 0x332200 }),
-  );
-  tower.scale.set(20, 64, 20);
-  tower.position.set(90, 32, -90);
-  group.add(tower);
-  colliders.push({ minX: 80, maxX: 100, minZ: -100, maxZ: -80 });
-
-  // Palms: trunk + fronds, along roads and the beach.
-  const trunkMat = new THREE.MeshLambertMaterial({ color: 0x8a6b48 });
-  const frondMat = new THREE.MeshLambertMaterial({ color: 0x3f9e4d });
-  const trunkGeo = new THREE.CylinderGeometry(0.35, 0.55, 7, 6);
-  const frondGeo = new THREE.ConeGeometry(1.9, 4.0, 4);
-  function palm(x, z) {
-    const p = new THREE.Group();
-    const trunk = new THREE.Mesh(trunkGeo, trunkMat);
-    trunk.position.y = 3.5;
-    trunk.rotation.z = 0.08;
-    p.add(trunk);
-    for (let i = 0; i < 6; i += 1) {
-      const f = new THREE.Mesh(frondGeo, frondMat);
-      const a = (i / 6) * Math.PI * 2;
-      f.position.set(Math.cos(a) * 1.25, 7.0, Math.sin(a) * 1.25);
-      f.rotation.z = Math.cos(a) * 1.1;
-      f.rotation.x = -Math.sin(a) * 1.1;
-      p.add(f);
+    // Street lamps along every road, both sides, staggered.
+    for (const rx of this.roadsX) {
+      for (let y = 120; y < WORLD.size - 60; y += 300) {
+        this.lamps.push({ x: rx - WORLD.roadWidth / 2 - 10, y });
+        this.lamps.push({ x: rx + WORLD.roadWidth / 2 + 10, y: y + 150 });
+      }
     }
-    p.position.set(x, 0, z);
-    group.add(p);
-  }
-  for (const r of CITY.ROADS) {
-    for (let t = -110; t <= 110; t += 40) {
-      if (Math.abs(t) < 12) continue;
-      palm(r + 11, t);
-      palm(t, r - 11);
-    }
-  }
-  for (let x = -140; x <= 140; x += 18) palm(x + range(rng, -4, 4), 158 + range(rng, -3, 3));
-
-  // Street lamps on every intersection corner.
-  const poleMat = new THREE.MeshLambertMaterial({ color: 0x2f3542 });
-  const lampMat = new THREE.MeshLambertMaterial({ color: 0xfff6c9, emissive: 0x555533 });
-  const poleGeo = new THREE.CylinderGeometry(0.12, 0.12, 6, 6);
-  const lampGeo = new THREE.SphereGeometry(0.5, 8, 6);
-  for (const rx of CITY.ROADS) {
-    for (const rz of CITY.ROADS) {
-      const pole = new THREE.Mesh(poleGeo, poleMat);
-      pole.position.set(rx + 9, 3, rz + 9);
-      group.add(pole);
-      const lamp = new THREE.Mesh(lampGeo, lampMat);
-      lamp.position.set(rx + 9, 6.2, rz + 9);
-      group.add(lamp);
+    for (const ry of this.roadsY) {
+      for (let x = 120; x < WORLD.size - 60; x += 300) {
+        this.lamps.push({ x, y: ry - WORLD.roadWidth / 2 - 10 });
+        this.lamps.push({ x: x + 150, y: ry + WORLD.roadWidth / 2 + 10 });
+      }
     }
   }
 
-  // Beach (south) + ocean + boardwalk strip.
-  const sand = new THREE.Mesh(
-    new THREE.PlaneGeometry(420, 60),
-    new THREE.MeshLambertMaterial({ color: 0xead9a7 }),
-  );
-  sand.rotation.x = -Math.PI / 2;
-  sand.position.set(0, 0.02, 180);
-  group.add(sand);
-  const ocean = new THREE.Mesh(
-    new THREE.PlaneGeometry(900, 300),
-    new THREE.MeshLambertMaterial({ color: 0x2e86c1 }),
-  );
-  ocean.rotation.x = -Math.PI / 2;
-  ocean.position.set(0, -0.3, 360);
-  group.add(ocean);
-  const board = new THREE.Mesh(
-    new THREE.PlaneGeometry(420, 8),
-    new THREE.MeshLambertMaterial({ color: 0xa9805a }),
-  );
-  board.rotation.x = -Math.PI / 2;
-  board.position.set(0, 0.03, 148);
-  group.add(board);
-
-  return { group, colliders, rng };
-}
-
-/** True when (x, z) is on a road surface (drivable). */
-export function isOnRoad(x, z) {
-  const on = (v) => CITY.ROADS.some((r) => Math.abs(v - r) <= CITY.ROAD_W / 2);
-  return on(x) || on(z);
-}
-/** Snap a point to the nearest road centre line. */
-export function nearestRoadPoint(x, z) {
-  let bx = CITY.ROADS[0];
-  let bz = CITY.ROADS[0];
-  for (const r of CITY.ROADS) {
-    if (Math.abs(x - r) < Math.abs(x - bx)) bx = r;
-    if (Math.abs(z - r) < Math.abs(z - bz)) bz = r;
+  isRoad(x, y) {
+    const half = WORLD.roadWidth / 2;
+    for (const rx of this.roadsX) if (Math.abs(x - rx) <= half) return true;
+    for (const ry of this.roadsY) if (Math.abs(y - ry) <= half) return true;
+    return false;
   }
-  return Math.abs(x - bx) < Math.abs(z - bz) ? { x: bx, z } : { x, z: bz };
+
+  // Nearest point on a road centre line (for spawning cars / walkers).
+  nearestRoadPoint(x, y) {
+    let best = null;
+    let bestD = Infinity;
+    for (const rx of this.roadsX) {
+      const d = Math.abs(x - rx);
+      if (d < bestD) { bestD = d; best = { x: rx, y, vertical: true }; }
+    }
+    for (const ry of this.roadsY) {
+      const d = Math.abs(y - ry);
+      if (d < bestD) { bestD = d; best = { x, y: ry, vertical: false }; }
+    }
+    return best;
+  }
+
+  randomRoadPoint(rng) {
+    if (rng() < 0.5) {
+      const rx = pick(rng, this.roadsX);
+      return { x: rx + range(rng, -28, 28), y: range(rng, 120, WORLD.size - 120), vertical: true };
+    }
+    const ry = pick(rng, this.roadsY);
+    return { x: range(rng, 120, WORLD.size - 120), y: ry + range(rng, -28, 28), vertical: false };
+  }
+
+  // Push a circle (x, y, r) out of buildings. Returns corrected {x, y, hit}.
+  collideBuildings(x, y, r) {
+    let hit = false;
+    for (const b of this.buildings) {
+      const cx = Math.max(b.x, Math.min(x, b.x + b.w));
+      const cy = Math.max(b.y, Math.min(y, b.y + b.h));
+      const dx = x - cx;
+      const dy = y - cy;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < r * r) {
+        hit = true;
+        if (d2 > 0.001) {
+          const d = Math.sqrt(d2);
+          x = cx + (dx / d) * r;
+          y = cy + (dy / d) * r;
+        } else {
+          // Centre inside the box: push out along the smallest axis.
+          const pushL = x - b.x + r;
+          const pushR = b.x + b.w - x + r;
+          const pushT = y - b.y + r;
+          const pushB = b.y + b.h - y + r;
+          const m = Math.min(pushL, pushR, pushT, pushB);
+          if (m === pushL) x = b.x - r;
+          else if (m === pushR) x = b.x + b.w + r;
+          else if (m === pushT) y = b.y - r;
+          else y = b.y + b.h + r;
+        }
+      }
+    }
+    return { x, y, hit };
+  }
+
+  pointInBuilding(x, y) {
+    for (const b of this.buildings) {
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return true;
+    }
+    return false;
+  }
 }
