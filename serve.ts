@@ -1,18 +1,14 @@
-// SOLARA CITY v3 — tiny static server for local play (Node stdlib only).
-// Serves game/ on http://localhost:8080 (or --port N). Development
-// convenience only: refuses paths outside game/, sends no-store, and
-// answers /favicon.ico with 204 so the console stays clean.
+// SOLARA CITY — serve.ts
+// Server statis sederhana untuk playtest lokal: sajikan game/ di
+// http://localhost:8080 (atau PORT). Node 22, stdlib saja.
 
-import { createReadStream, statSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { extname, join, normalize, resolve, sep } from 'node:path';
+import { readFileSync, existsSync, statSync } from 'node:fs';
+import { join, extname, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const root = resolve(fileURLToPath(new URL('./game', import.meta.url)));
-const args = process.argv.slice(2);
-const portIndex = args.indexOf('--port');
-const requested = portIndex === -1 ? 8080 : Number(args[portIndex + 1]);
-const port = Number.isInteger(requested) && requested > 0 && requested < 65536 ? requested : 8080;
+const root = join(fileURLToPath(new URL('.', import.meta.url)), 'game');
+const port = Number(process.env.PORT || 8080);
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -23,43 +19,21 @@ const MIME = {
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
-  '.svg': 'image/svg+xml',
 };
 
-createServer((request, response) => {
-  const url = new URL(request.url ?? '/', 'http://localhost');
-  let pathname;
-  try {
-    pathname = decodeURIComponent(url.pathname);
-  } catch {
-    response.writeHead(400).end('bad request');
+const server = createServer((req, res) => {
+  const urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
+  const rel = normalize(urlPath === '/' ? 'index.html' : urlPath.replace(/^\/+/, ''));
+  const file = join(root, rel);
+  if (!file.startsWith(root) || !existsSync(file) || !statSync(file).isFile()) {
+    res.writeHead(404, { 'content-type': 'text/plain' });
+    res.end('not found: ' + urlPath);
     return;
   }
-  if (pathname === '/favicon.ico') {
-    response.writeHead(204).end();
-    return;
-  }
-  if (pathname.endsWith('/')) pathname += 'index.html';
-  const file = resolve(join(root, normalize(pathname)));
-  if (file !== root && !file.startsWith(root + sep)) {
-    response.writeHead(403).end('forbidden');
-    return;
-  }
-  let size;
-  try {
-    const stats = statSync(file);
-    if (!stats.isFile()) throw new Error('not a file');
-    size = stats.size;
-  } catch {
-    response.writeHead(404).end('not found');
-    return;
-  }
-  response.writeHead(200, {
-    'content-type': MIME[extname(file).toLowerCase()] ?? 'application/octet-stream',
-    'content-length': size,
-    'cache-control': 'no-store',
-  });
-  createReadStream(file).pipe(response);
-}).listen(port, '127.0.0.1', () => {
-  console.log(`game/ is on http://localhost:${port}`);
+  res.writeHead(200, { 'content-type': MIME[extname(file)] || 'application/octet-stream' });
+  res.end(readFileSync(file));
+});
+
+server.listen(port, () => {
+  console.log(`SOLARA CITY served at http://localhost:${port}`);
 });

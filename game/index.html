@@ -3,16 +3,23 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="dark">
-<title>SOLARA CITY — Game Dunia Terbuka</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23f2c14e'/%3E%3Ctext x='16' y='23' font-size='20' text-anchor='middle' font-family='sans-serif' font-weight='bold' fill='%2314101c'%3ES%3C/text%3E%3C/svg%3E">
+<title>SOLARA CITY — Open-World Crime Game</title>
 <style>
-  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #070a18; }
-  #game { display: block; width: 100vw; height: 100vh; }
+  html, body { margin: 0; padding: 0; overflow: hidden; background: #14101c; height: 100%; }
+  #game { display: block; width: 100vw; height: 100vh; cursor: crosshair; }
+  #fallback {
+    position: fixed; inset: 0; display: none; place-items: center;
+    color: #f2c14e; font: 18px system-ui, sans-serif; text-align: center;
+  }
 </style>
 </head>
 <body>
 <canvas id="game"></canvas>
-<noscript><p style="color:#e6e9f2;font:16px system-ui,sans-serif;text-align:center">SOLARA CITY butuh JavaScript untuk jalan.</p></noscript>
+<div id="fallback"><p>SOLARA CITY butuh JavaScript dan canvas.<br>Buka file ini di desktop Chrome.</p></div>
+<script>
+  if (!window.HTMLCanvasElement) document.getElementById('fallback').style.display = 'grid';
+</script>
 <script type="module" src="./src/main.js"></script>
 </body>
 </html>

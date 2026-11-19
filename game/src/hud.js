@@ -1,341 +1,299 @@
-// SOLARA CITY v3 — HUD and screens, all drawn on the canvas: cash, wanted
-// stars (animated, colour by level), mission tracker, speed, minimap, toasts,
-// and the boot / pause / busted / wasted / legend overlays with click buttons.
+// SOLARA CITY — hud.js
+// HUD di atas canvas: cash, bintang wanted beranimasi, tracker misi,
+// speedometer, minimap (pemain, polisi, target), banner misi, dan semua
+// layar menu (boot, pause, busted, wasted, legend).
 
-import { WANTED_COLORS, WORLD, LEGEND_CASH } from './config.js';
+import { ECONOMY, MISSIONS, COLORS } from './config.js';
+import { fmtCash, clamp } from './random.js';
 
-function roundRect(ctx, x, y, w, h, r) {
-  ctx.beginPath();
-  ctx.roundRect(x, y, w, h, r);
-}
+// Gambar HUD + menu sesuai screen game ('boot' | 'play' | 'pause' |
+// 'busted' | 'wasted' | 'legend'). hasSave = ada save di localStorage.
+export function drawHud(ctx, game) {
+  const W = ctx.canvas.width, H = ctx.canvas.height;
+  const { player, wanted, cash, missions, time } = game;
+  if (game.screen === 'boot') { drawBoot(ctx, game, W, H); return; }
+  if (game.screen === 'pause') { drawPause(ctx, game, W, H); return; }
+  if (game.screen === 'busted') { drawBusted(ctx, W, H, game.bustedCash); return; }
+  if (game.screen === 'wasted') { drawWasted(ctx, W, H); return; }
+  if (game.screen === 'legend') { drawLegend(ctx, W, H); return; }
 
-export function drawHUD(ctx, G) {
-  const W = G.canvas.width;
-  const H = G.canvas.height;
-  const now = G.time;
-  // --- cash ---
-  ctx.save();
-  ctx.fillStyle = 'rgba(6,10,22,0.72)';
-  roundRect(ctx, 14, 12, 218, 54, 10);
-  ctx.fill();
-  ctx.fillStyle = '#7ee787';
-  ctx.font = '700 26px system-ui, sans-serif';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(`$${G.cash.toLocaleString('en-US')}`, 28, 40);
-  ctx.fillStyle = '#9aa5b1';
-  ctx.font = '12px system-ui, sans-serif';
-  ctx.fillText(`TARGET $${LEGEND_CASH.toLocaleString('en-US')}`, 132, 26);
-  ctx.fillStyle = '#2c3350';
-  roundRect(ctx, 132, 36, 82, 8, 4);
-  ctx.fill();
-  ctx.fillStyle = '#7ee787';
-  roundRect(ctx, 132, 36, 82 * Math.min(1, G.cash / LEGEND_CASH), 8, 4);
-  ctx.fill();
-  // --- wanted stars (top centre, animated) ---
-  const stars = G.wanted;
-  const col = WANTED_COLORS[stars] || '#9aa5b1';
-  const blink = stars === 3 ? (Math.sin(now * 9) > 0 ? 1 : 0.45) : 1;
-  ctx.globalAlpha = blink;
-  ctx.fillStyle = 'rgba(6,10,22,0.72)';
-  roundRect(ctx, W / 2 - 92, 12, 184, 46, 10);
-  ctx.fill();
-  ctx.font = '26px system-ui, sans-serif';
-  ctx.textAlign = 'center';
-  for (let i = 0; i < 5; i++) {
-    ctx.fillStyle = i < stars ? col : '#39415e';
-    ctx.fillText('★', W / 2 - 64 + i * 32, 37);
-  }
+  // --- Panel atas kiri: cash + misi ---
+  panel(ctx, 16, 14, 250, 64);
+  ctx.fillStyle = '#f2c14e';
+  ctx.font = 'bold 26px system-ui, sans-serif';
   ctx.textAlign = 'left';
-  ctx.globalAlpha = 1;
-  // --- mission tracker (under cash) ---
-  const m = G.missions.current;
-  ctx.fillStyle = 'rgba(6,10,22,0.72)';
-  roundRect(ctx, 14, 74, 258, m ? 74 : 44, 10);
-  ctx.fill();
-  ctx.fillStyle = '#f5c542';
-  ctx.font = '700 14px system-ui, sans-serif';
-  if (m) {
-    ctx.fillText(`MISI ${m.id}/4 — ${m.name}`, 26, 96);
-    ctx.fillStyle = '#e6e9f2';
-    ctx.font = '12px system-ui, sans-serif';
-    const obj = G.missions.target ? G.missions.target.label : (m.kind === 'survive' ? 'BERTAHAN HIDUP!' : '—');
-    ctx.fillText(obj, 26, 116);
-    if ((m.kind === 'escape' || m.kind === 'survive') && G.missions.timeLeft > 0) {
-      ctx.fillStyle = G.missions.timeLeft < 10 ? '#ff6b6b' : '#ffd23f';
-      ctx.font = '700 15px system-ui, sans-serif';
-      ctx.fillText(`⏱ ${Math.ceil(G.missions.timeLeft)} dtk`, 26, 136);
-    }
-    ctx.fillStyle = '#7ee787';
-    ctx.font = '12px system-ui, sans-serif';
-    ctx.fillText(`Hadiah +$${m.reward}`, 180, 136);
+  ctx.fillText(fmtCash(cash), 30, 44);
+  ctx.fillStyle = '#cfd6de';
+  ctx.font = '14px system-ui, sans-serif';
+  const cur = MISSIONS[missions.index];
+  ctx.fillText(cur ? `Misi ${cur.id}: ${cur.name}` : 'Semua misi selesai', 30, 66);
+  // Progress bar ke LEGEND.
+  ctx.fillStyle = 'rgba(255,255,255,0.18)';
+  ctx.fillRect(16, 84, 250, 6);
+  ctx.fillStyle = '#f2c14e';
+  ctx.fillRect(16, 84, 250 * clamp(cash / ECONOMY.legendTotal, 0, 1), 6);
+
+  // --- Wanted stars kanan atas, berkedip + warna per level ---
+  const starColors = ['', '#ffd23e', '#ff8c2e', '#ff3b30'];
+  const blink = wanted > 0 && Math.sin(time * (4 + wanted * 2)) > 0;
+  panel(ctx, W - 216, 14, 200, 56);
+  ctx.font = 'bold 15px system-ui, sans-serif';
+  ctx.fillStyle = '#cfd6de';
+  ctx.fillText('WANTED', W - 200, 34);
+  for (let i = 0; i < 3; i++) {
+    const active = i < wanted;
+    const col = active ? starColors[wanted] : '#3a4150';
+    drawStar(ctx, W - 118 + i * 34, 42, active && blink ? 15 : 12, col, active && blink);
+  }
+
+  // --- Speedometer kanan bawah (saat di mobil) ---
+  if (player.inCar) {
+    const kmh = Math.round(Math.abs(player.car.speed) * 0.36);
+    panel(ctx, W - 150, H - 96, 134, 80);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 34px system-ui, sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(String(kmh), W - 40, H - 46);
+    ctx.fillStyle = '#9aa4b2';
+    ctx.font = '13px system-ui, sans-serif';
+    ctx.fillText('km/h', W - 40, H - 26);
+    ctx.textAlign = 'left';
+    // Kesehatan mobil (proxy: kecepatan aman) — tampilkan HP pemain.
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.fillRect(W - 134, H - 20, 102, 5);
+    ctx.fillStyle = player.health > 40 ? '#39d353' : '#ff3b30';
+    ctx.fillRect(W - 134, H - 20, 102 * clamp(player.health / 100, 0, 1), 5);
   } else {
-    ctx.fillText('SEMUA MISI SELESAI', 26, 96);
-    ctx.fillStyle = '#7ee787';
-    ctx.font = '12px system-ui, sans-serif';
-    ctx.fillText('SOLARA LEGEND!', 26, 116);
+    // HP saat jalan kaki.
+    panel(ctx, W - 150, H - 96, 134, 80);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.fillText('JALAN KAKI', W - 134, H - 60);
+    ctx.fillStyle = '#9aa4b2';
+    ctx.font = '13px system-ui, sans-serif';
+    ctx.fillText('Tekan E di dekat mobil', W - 134, H - 40);
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.fillRect(W - 134, H - 30, 102, 5);
+    ctx.fillStyle = player.health > 40 ? '#39d353' : '#ff3b30';
+    ctx.fillRect(W - 134, H - 30, 102 * clamp(player.health / 100, 0, 1), 5);
   }
-  // --- speed (bottom right) ---
-  const kmh = Math.round(G.player.speed * 0.24);
-  ctx.fillStyle = 'rgba(6,10,22,0.72)';
-  roundRect(ctx, W - 138, H - 62, 124, 50, 10);
-  ctx.fill();
-  ctx.fillStyle = '#e6e9f2';
-  ctx.font = '700 24px system-ui, sans-serif';
-  ctx.textAlign = 'right';
-  ctx.fillText(`${kmh}`, W - 52, H - 37);
-  ctx.fillStyle = '#9aa5b1';
-  ctx.font = '11px system-ui, sans-serif';
-  ctx.fillText('km/h', W - 24, H - 37);
-  ctx.textAlign = 'left';
-  // --- health bar (bottom left, above hint) ---
-  ctx.fillStyle = 'rgba(6,10,22,0.72)';
-  roundRect(ctx, 14, H - 62, 190, 50, 10);
-  ctx.fill();
-  ctx.fillStyle = '#9aa5b1';
-  ctx.font = '11px system-ui, sans-serif';
-  ctx.fillText('NYAWA', 26, H - 46);
-  ctx.fillStyle = '#2c3350';
-  roundRect(ctx, 26, H - 38, 166, 10, 5);
-  ctx.fill();
-  ctx.fillStyle = G.player.health > 35 ? '#4ade80' : '#ff6b6b';
-  roundRect(ctx, 26, H - 38, 166 * (G.player.health / 100), 10, 5);
-  ctx.fill();
-  // --- controls hint ---
-  ctx.fillStyle = 'rgba(230,233,242,0.55)';
-  ctx.font = '11px system-ui, sans-serif';
-  ctx.fillText('WASD nyetir/jalan · E curi mobil · Spasi tembak · P jeda', 218, H - 32);
-  // --- minimap (top right) ---
-  drawMinimap(ctx, G);
-  // --- toasts ---
-  let ty = 78;
-  for (const t of G.toasts) {
-    const age = now - t.t;
-    if (age > t.dur) continue;
-    const a = age < 0.2 ? age / 0.2 : age > t.dur - 0.4 ? (t.dur - age) / 0.4 : 1;
-    ctx.globalAlpha = Math.max(0, Math.min(1, a));
-    ctx.font = '700 16px system-ui, sans-serif';
-    const tw = ctx.measureText(t.text).width + 28;
-    ctx.fillStyle = 'rgba(6,10,22,0.78)';
-    roundRect(ctx, W / 2 - tw / 2, ty, tw, 34, 9);
-    ctx.fill();
-    ctx.fillStyle = t.color || '#e6e9f2';
+
+  // --- Tracker misi bawah kiri ---
+  drawMissionTracker(ctx, game, 16, H - 118);
+
+  // --- Minimap kanan bawah di atas speedometer ---
+  drawMinimap(ctx, game, W - 216, H - 316, 200, 200);
+
+  // --- Banner tengah ---
+  if (missions.banner && missions.bannerT > 0) {
+    const a = clamp(missions.bannerT, 0, 1);
+    ctx.globalAlpha = a;
     ctx.textAlign = 'center';
-    ctx.fillText(t.text, W / 2, ty + 18);
-    ctx.textAlign = 'left';
-    ctx.globalAlpha = 1;
-    ty += 42;
-  }
-  // --- big banner (mission complete / legend flash) ---
-  if (G.banner && now < G.banner.until) {
-    const age = now - G.banner.t;
-    const a = age < 0.25 ? age / 0.25 : age > 1.6 ? Math.max(0, (G.banner.until - now) / 0.6) : 1;
-    ctx.globalAlpha = Math.max(0, Math.min(1, a));
-    ctx.textAlign = 'center';
-    ctx.fillStyle = G.banner.color || '#ffd23f';
-    ctx.font = '800 44px system-ui, sans-serif';
-    ctx.fillText(G.banner.text, W / 2, H * 0.32);
-    if (G.banner.sub) {
-      ctx.fillStyle = '#e6e9f2';
-      ctx.font = '700 22px system-ui, sans-serif';
-      ctx.fillText(G.banner.sub, W / 2, H * 0.32 + 38);
+    ctx.fillStyle = 'rgba(8,12,20,0.78)';
+    const bw = 560;
+    ctx.fillRect(W / 2 - bw / 2, 108, bw, missions.banner.sub ? 74 : 52);
+    ctx.fillStyle = '#f2c14e';
+    ctx.font = 'bold 26px system-ui, sans-serif';
+    ctx.fillText(missions.banner.text, W / 2, 142);
+    if (missions.banner.sub) {
+      ctx.fillStyle = '#e8ecf1';
+      ctx.font = '15px system-ui, sans-serif';
+      ctx.fillText(missions.banner.sub, W / 2, 168);
     }
-    ctx.textAlign = 'left';
     ctx.globalAlpha = 1;
+    ctx.textAlign = 'left';
   }
-  ctx.restore();
+
+  // --- Hint kontekstual ---
+  if (game.hint) {
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(8,12,20,0.72)';
+    const hw = ctx.measureText(game.hint).width + 36;
+    ctx.fillRect(W / 2 - hw / 2, H - 52, hw, 34);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 15px system-ui, sans-serif';
+    ctx.fillText(game.hint, W / 2, H - 29);
+    ctx.textAlign = 'left';
+  }
+
+  // Timer misi 2 / survival misi 3.
+  if (missions.phase === 'toPickup' || missions.phase === 'toDrop') {
+    const cur2 = MISSIONS[missions.index];
+    if (cur2 && cur2.id === 2) {
+      ctx.textAlign = 'center';
+      ctx.fillStyle = missions.timer < 15 ? '#ff3b30' : '#fff';
+      ctx.font = 'bold 30px system-ui, sans-serif';
+      ctx.fillText('⏱ ' + Math.ceil(missions.timer) + 's', W / 2, 210);
+      ctx.textAlign = 'left';
+    }
+  }
+  if (missions.phase === 'survive') {
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ff8c2e';
+    ctx.font = 'bold 30px system-ui, sans-serif';
+    ctx.fillText('BERTAHAN: ' + Math.ceil(missions.surviveLeft) + 's', W / 2, 210);
+    ctx.textAlign = 'left';
+  }
 }
 
-function drawMinimap(ctx, G) {
-  const W = G.canvas.width;
-  const size = 148;
-  const x0 = W - size - 14;
-  const y0 = 74;
-  const s = size / WORLD.size;
-  ctx.save();
-  ctx.fillStyle = 'rgba(6,10,22,0.78)';
-  roundRect(ctx, x0 - 4, y0 - 4, size + 8, size + 8, 10);
-  ctx.fill();
+function panel(ctx, x, y, w, h) {
+  ctx.fillStyle = COLORS.hudPanel;
   ctx.beginPath();
-  roundRect(ctx, x0, y0, size, size, 6);
-  ctx.clip();
-  ctx.fillStyle = '#141a2e';
-  ctx.fillRect(x0, y0, size, size);
-  ctx.strokeStyle = '#2c3350';
+  ctx.roundRect(x, y, w, h, 10);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.14)';
   ctx.lineWidth = 1;
-  for (const rx of G.city.roadsX) {
-    ctx.beginPath();
-    ctx.moveTo(x0 + rx * s, y0);
-    ctx.lineTo(x0 + rx * s, y0 + size);
-    ctx.stroke();
-  }
-  for (const ry of G.city.roadsY) {
-    ctx.beginPath();
-    ctx.moveTo(x0, y0 + ry * s);
-    ctx.lineTo(x0 + size, y0 + ry * s);
-    ctx.stroke();
-  }
-  // Mission target: pulsing gold diamond.
-  if (G.missions.target) {
-    const t = G.missions.target;
-    const r = 4 + 1.6 * Math.sin(G.time * 5);
-    ctx.fillStyle = '#f5c542';
-    ctx.beginPath();
-    ctx.arc(x0 + t.x * s, y0 + t.y * s, r + 2, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  // Police: flashing blue/red dots.
-  for (const c of G.police.cars) {
-    if (c.wrecked) continue;
-    ctx.fillStyle = Math.sin(G.time * 10 + c.id) > 0 ? '#3b82f6' : '#ef4444';
-    ctx.beginPath();
-    ctx.arc(x0 + c.x * s, y0 + c.y * s, 3.4, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  // Player: white dot with ring.
-  ctx.fillStyle = '#ffffff';
-  ctx.beginPath();
-  ctx.arc(x0 + G.player.x * s, y0 + G.player.y * s, 4, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = '#22d3ee';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.arc(x0 + G.player.x * s, y0 + G.player.y * s, 6.5, 0, Math.PI * 2);
   ctx.stroke();
+}
+
+function drawStar(ctx, cx, cy, r, color, glow) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  if (glow) {
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 14;
+  }
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const rr = i % 2 === 0 ? r : r * 0.45;
+    const a = -Math.PI / 2 + (i * Math.PI) / 5;
+    const x = Math.cos(a) * rr, y = Math.sin(a) * rr;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fill();
   ctx.restore();
 }
 
-function overlay(ctx, W, H, alpha = 0.72) {
-  ctx.fillStyle = `rgba(4,7,16,${alpha})`;
+function drawMissionTracker(ctx, game, x, y) {
+  const { missions } = game;
+  panel(ctx, x, y, 300, 102);
+  ctx.fillStyle = '#f2c14e';
+  ctx.font = 'bold 14px system-ui, sans-serif';
+  ctx.fillText('TRACKER MISI', x + 14, y + 22);
+  ctx.font = '13px system-ui, sans-serif';
+  MISSIONS.forEach((m, i) => {
+    const done = i < missions.index;
+    const active = i === missions.index && missions.phase !== 'idle';
+    const waiting = i === missions.index && missions.phase === 'idle';
+    ctx.fillStyle = done ? '#39d353' : active ? '#ffd23e' : '#8a94a3';
+    const mark = done ? '✓' : active ? '►' : waiting ? '○' : '·';
+    const label = `${mark}  M${m.id} ${m.name}  +$${m.reward}`;
+    ctx.fillText(label, x + 14, y + 44 + i * 18);
+  });
+}
+
+function drawMinimap(ctx, game, x, y, w, h) {
+  const { city, player, cops, missions } = game;
+  const scale = w / 4200;
+  panel(ctx, x - 6, y - 6, w + 12, h + 12);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x, y, w, h);
+  ctx.clip();
+  ctx.fillStyle = '#1d2b1e';
+  ctx.fillRect(x, y, w, h);
+  // Jalan di minimap.
+  ctx.fillStyle = '#4a4f57';
+  for (let g = 0; g <= 4200; g += 300) {
+    ctx.fillRect(x + g * scale - 2, y, 4, h);
+    ctx.fillRect(x, y + g * scale - 2, w, 4);
+  }
+  // Target misi.
+  const cur = MISSIONS[missions.index];
+  if (cur && (missions.phase === 'toPickup' || missions.phase === 'toDrop')) {
+    const pt = missions.phase === 'toPickup' ? cur.pickup : cur.drop;
+    if (pt) {
+      ctx.fillStyle = missions.phase === 'toPickup' ? '#f2c14e' : '#39d353';
+      ctx.beginPath();
+      ctx.arc(x + pt.x * scale, y + pt.y * scale, 6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  // Polisi (biru/merah berkedip).
+  for (const cop of cops) {
+    ctx.fillStyle = Math.sin(game.time * 8) > 0 ? '#ff3b30' : '#2f7bff';
+    ctx.beginPath();
+    ctx.arc(x + cop.x * scale, y + cop.y * scale, 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // Pemain (panah putih).
+  const px = player.inCar ? player.car.x : player.x;
+  const py = player.inCar ? player.car.y : player.y;
+  const pa = player.inCar ? player.car.angle : player.aimAngle;
+  ctx.save();
+  ctx.translate(x + px * scale, y + py * scale);
+  ctx.rotate(pa);
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.moveTo(7, 0); ctx.lineTo(-5, -5); ctx.lineTo(-5, 5);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+  ctx.restore();
+  ctx.fillStyle = '#cfd6de';
+  ctx.font = 'bold 12px system-ui, sans-serif';
+  ctx.fillText('SOLARA CITY', x + 2, y + h + 22);
+}
+
+// ---------- Layar menu ----------
+
+function menuBase(ctx, W, H, title, subtitle, lines, accent, alpha) {
+  ctx.fillStyle = `rgba(10,10,24,${alpha === undefined ? 0.82 : alpha})`;
   ctx.fillRect(0, 0, W, H);
-}
-
-function title(ctx, W, text, y, size = 54, color = '#f5c542') {
   ctx.textAlign = 'center';
-  ctx.fillStyle = color;
-  ctx.font = `800 ${size}px system-ui, sans-serif`;
-  ctx.fillText(text, W / 2, y);
+  ctx.fillStyle = accent || '#f2c14e';
+  ctx.font = 'bold 64px system-ui, sans-serif';
+  ctx.fillText(title, W / 2, H / 2 - 130);
+  ctx.fillStyle = '#e8ecf1';
+  ctx.font = '20px system-ui, sans-serif';
+  ctx.fillText(subtitle, W / 2, H / 2 - 92);
+  ctx.font = '16px system-ui, sans-serif';
+  ctx.fillStyle = '#c9d1da';
+  lines.forEach((ln, i) => ctx.fillText(ln, W / 2, H / 2 - 40 + i * 28));
   ctx.textAlign = 'left';
 }
 
-function button(ctx, G, id, label, y, w = 300, accent = false) {
-  const W = G.canvas.width;
-  const x = W / 2 - w / 2;
-  const h = 48;
-  ctx.fillStyle = accent ? '#f5c542' : 'rgba(255,255,255,0.10)';
-  roundRect(ctx, x, y, w, h, 10);
-  ctx.fill();
-  ctx.strokeStyle = accent ? '#f5c542' : 'rgba(255,255,255,0.25)';
-  ctx.lineWidth = 1.5;
-  roundRect(ctx, x, y, w, h, 10);
-  ctx.stroke();
-  ctx.fillStyle = accent ? '#11162a' : '#e6e9f2';
-  ctx.font = '700 18px system-ui, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText(label, W / 2, y + 30);
-  ctx.textAlign = 'left';
-  G.uiButtons.push({ id, x, y, w, h });
+function drawBoot(ctx, game, W, H) {
+  menuBase(ctx, W, H, 'SOLARA CITY', 'Kota matahari terbenam. Satu legenda. $3.100.',
+    [
+      'WASD / Panah — jalan & nyetir    •    E — curi mobil / keluar mobil',
+      'Mouse — arahkan & tembak (klik / spasi)    •    Shift — lari',
+      'M — mulai misi    •    P / Esc — pause    •    H — bantuan',
+      '',
+      game.hasSave ? '▶  Tekan ENTER untuk CONTINUE (save ditemukan)' : '▶  Tekan ENTER untuk MULAI',
+      'Misi: Paket Panas → Kabur → Badai Sirene → Coupe Emas → SOLARA LEGEND',
+    ], '#f2c14e');
+  // Strip kota mini di bawah judul.
+  ctx.fillStyle = '#2b2f36';
+  ctx.fillRect(W / 2 - 260, H / 2 + 130, 520, 8);
+  ctx.fillStyle = '#f2c14e';
+  for (let i = 0; i < 9; i++) ctx.fillRect(W / 2 - 250 + i * 56, H / 2 + 132, 26, 4);
 }
 
-function controlsBlock(ctx, W, y) {
-  ctx.textAlign = 'center';
-  ctx.fillStyle = '#9aa5b1';
-  ctx.font = '15px system-ui, sans-serif';
-  const lines = [
-    'WASD / Panah — jalan & nyetir',
-    'E — curi mobil (dekat mobil) / keluar mobil',
-    'Spasi — tembak    ·    P / Esc — jeda',
-    'Enter — mulai / lanjutkan',
-  ];
-  lines.forEach((l, i) => ctx.fillText(l, W / 2, y + i * 24));
-  ctx.textAlign = 'left';
+function drawPause(ctx, game, W, H) {
+  menuBase(ctx, W, H, 'PAUSE', 'Istirahat sebentar, legenda.',
+    [
+      'P / Esc — lanjut main',
+      'R — restart dari save terakhir',
+      '',
+      'WASD jalan/nyetir • E curi mobil • Klik/spasi tembak • M misi • Shift lari',
+      `Cash: ${fmtCash(game.cash)}   •   Misi: ${game.missions.index + 1}/4`,
+    ]);
 }
 
-export function drawBoot(ctx, G) {
-  const W = G.canvas.width;
-  const H = G.canvas.height;
-  G.uiButtons = [];
-  overlay(ctx, W, H, 0.62);
-  title(ctx, W, 'SOLARA CITY', 150, 64);
-  ctx.textAlign = 'center';
-  ctx.fillStyle = '#22d3ee';
-  ctx.font = '700 20px system-ui, sans-serif';
-  ctx.fillText('Kota malam. Curi mobil. Selesaikan 4 misi. Jadi legenda.', W / 2, 190);
-  ctx.textAlign = 'left';
-  button(ctx, G, 'start', '▶  MULAI (Enter)', 250, 320, true);
-  if (G.hasSave) button(ctx, G, 'continue', `↻  LANJUTKAN — $${G.saveCash.toLocaleString('en-US')} · Misi ${Math.min(4, G.saveMission + 1)}/4`, 312, 320);
-  controlsBlock(ctx, W, G.hasSave ? 400 : 360);
-  ctx.textAlign = 'center';
-  ctx.fillStyle = 'rgba(230,233,242,0.5)';
-  ctx.font = '12px system-ui, sans-serif';
-  ctx.fillText('Game orisinal buatan agen — bukan GTA Rockstar. Semua aset prosedural, tanpa unduhan.', W / 2, H - 24);
-  ctx.textAlign = 'left';
+function drawBusted(ctx, W, H, fine) {
+  menuBase(ctx, W, H, 'BUSTED!', 'Polisi menangkapmu. Denda $' + (fine || 120) + '.',
+    ['Tekan ENTER untuk respawn di titik aman.', 'Misi aktif bisa diulang dari awal.'], '#2f7bff');
 }
 
-export function drawPause(ctx, G) {
-  const W = G.canvas.width;
-  const H = G.canvas.height;
-  G.uiButtons = [];
-  overlay(ctx, W, H, 0.66);
-  title(ctx, W, 'JEDA', 150, 52, '#e6e9f2');
-  ctx.textAlign = 'center';
-  ctx.fillStyle = '#9aa5b1';
-  ctx.font = '15px system-ui, sans-serif';
-  ctx.fillText(`Uang $${G.cash.toLocaleString('en-US')}  ·  Misi ${Math.min(4, G.missions.index + 1)}/4  ·  Wanted ${G.wanted}★`, W / 2, 196);
-  ctx.textAlign = 'left';
-  button(ctx, G, 'resume', '▶  LANJUTKAN (P)', 240, 300, true);
-  button(ctx, G, 'restart', '↻  MULAI ULANG (R)', 302, 300);
-  button(ctx, G, 'quit', 'Keluar ke Menu', 364, 300);
-  controlsBlock(ctx, W, 452);
+function drawWasted(ctx, W, H) {
+  menuBase(ctx, W, H, 'WASTED', 'Kamu tumbang di jalanan Solara.',
+    ['Tekan ENTER untuk retry dari checkpoint terakhir.', 'Cash dan progres misi tersimpan.'], '#ff3b30');
 }
 
-export function drawBusted(ctx, G) {
-  const W = G.canvas.width;
-  const H = G.canvas.height;
-  G.uiButtons = [];
-  overlay(ctx, W, H, 0.7);
-  title(ctx, W, 'BUSTED!', 180, 64, '#3b82f6');
-  ctx.textAlign = 'center';
-  ctx.fillStyle = '#e6e9f2';
-  ctx.font = '18px system-ui, sans-serif';
-  ctx.fillText(`Polisi menangkapmu. Uang hilang $${G.bustedLost.toLocaleString('en-US')}.`, W / 2, 230);
-  ctx.fillStyle = '#9aa5b1';
-  ctx.font = '15px system-ui, sans-serif';
-  ctx.fillText('Kamu respawn di jalan. Misi aktif bisa diulang.', W / 2, 260);
-  ctx.textAlign = 'left';
-  button(ctx, G, 'respawn', '↻  RESPAWN (Enter)', 310, 300, true);
-}
-
-export function drawWasted(ctx, G) {
-  const W = G.canvas.width;
-  const H = G.canvas.height;
-  G.uiButtons = [];
-  overlay(ctx, W, H, 0.7);
-  title(ctx, W, 'WASTED', 180, 64, '#ff3b30');
-  ctx.textAlign = 'center';
-  ctx.fillStyle = '#e6e9f2';
-  ctx.font = '18px system-ui, sans-serif';
-  ctx.fillText('Kamu tumbang di jalanan Solara.', W / 2, 230);
-  ctx.fillStyle = '#9aa5b1';
-  ctx.font = '15px system-ui, sans-serif';
-  ctx.fillText('Coba lagi dari checkpoint terakhir.', W / 2, 260);
-  ctx.textAlign = 'left';
-  button(ctx, G, 'retry', '↻  COBA LAGI (Enter)', 310, 300, true);
-}
-
-export function drawLegend(ctx, G) {
-  const W = G.canvas.width;
-  const H = G.canvas.height;
-  G.uiButtons = [];
-  overlay(ctx, W, H, 0.66);
-  title(ctx, W, '★ SOLARA LEGEND ★', 150, 56);
-  ctx.textAlign = 'center';
-  ctx.fillStyle = '#e6e9f2';
-  ctx.font = '700 22px system-ui, sans-serif';
-  ctx.fillText(`$${G.cash.toLocaleString('en-US')} — semua 4 misi selesai!`, W / 2, 206);
-  ctx.fillStyle = '#f5c542';
-  ctx.font = '18px system-ui, sans-serif';
-  ctx.fillText('Coupe emas itu sekarang milikmu. Kota ini milikmu.', W / 2, 240);
-  ctx.textAlign = 'left';
-  button(ctx, G, 'freeroam', '▶  JELAJAH KOTA (Enter)', 300, 320, true);
-  button(ctx, G, 'again', '↻  MAIN LAGI DARI AWAL', 362, 320);
+function drawLegend(ctx, W, H) {
+  menuBase(ctx, W, H, 'SOLARA LEGEND', 'Total $3.100 — kamu menguasai kota!',
+    ['Coupe emas ada di garasimu. Polisi tak lagi berani mendekat.',
+     'Tekan ENTER untuk terus menjelajah kota, atau R untuk main lagi dari awal.'], '#f2c14e', 0.58);
 }

@@ -1,80 +1,107 @@
-// SOLARA CITY v3 — combat: bullets fired by the player (Space) and by the
-// police. Simple circle hits against police cars; player bullets also scare
-// pedestrians. Muzzle flashes and tracers are drawn by render.js.
+// SOLARA CITY — combat.js
+// Tembakan pemain (mouse / spasi), peluru, tabrakan peluru vs polisi /
+// pejalan / mobil, dan damage ke pemain. Semua hit memberi feedback
+// (partikel + shake) lewat fx.
 
-import { WORLD } from './config.js';
+import { PLAYER } from './config.js';
+import { dist } from './random.js';
 
-export class Combat {
-  constructor() {
-    this.bullets = []; // {x, y, angle, speed, from, life, damage}
-    this.cooldown = 0;
-  }
+export function createCombat() {
+  return {
+    bullets: [],       // {x,y,vx,vy,life,fromPlayer}
+    cooldown: 0,
+    muzzle: 0,
+  };
+}
 
-  playerShoot(x, y, angle) {
-    if (this.cooldown > 0) return null;
-    this.cooldown = 0.22;
-    const b = {
-      x: x + Math.cos(angle) * 26,
-      y: y + Math.sin(angle) * 26,
-      angle,
-      speed: 780,
-      from: 'player',
-      life: 0.9,
-      damage: 34,
-    };
-    this.bullets.push(b);
-    return b;
-  }
+// Tembak dari posisi pemain ke arah sudut aim. Mengembalikan true bila
+// peluru benar-benar ditembakkan (cooldown habis).
+export function shoot(combat, x, y, aimAngle, fx, audio) {
+  if (combat.cooldown > 0) return false;
+  combat.cooldown = PLAYER.shootCooldown;
+  combat.muzzle = 0.07;
+  const bx = x + Math.cos(aimAngle) * 22;
+  const by = y + Math.sin(aimAngle) * 22;
+  combat.bullets.push({
+    x: bx, y: by,
+    vx: Math.cos(aimAngle) * PLAYER.bulletSpeed,
+    vy: Math.sin(aimAngle) * PLAYER.bulletSpeed,
+    life: 0.9, fromPlayer: true,
+  });
+  if (fx) fx.muzzle(bx, by);
+  if (audio) audio.shoot();
+  return true;
+}
 
-  policeShoot(x, y, angle) {
-    const b = {
-      x: x + Math.cos(angle) * 26,
-      y: y + Math.sin(angle) * 26,
-      angle,
-      speed: 560,
-      from: 'police',
-      life: 1.1,
-      damage: 9,
-    };
-    this.bullets.push(b);
-    return b;
-  }
+// Polisi juga menembak sesekali saat dekat (hanya di wanted 3).
+export function copShoot(combat, cop, px, py) {
+  const a = Math.atan2(py - cop.y, px - cop.x) + (Math.random() - 0.5) * 0.22;
+  combat.bullets.push({
+    x: cop.x + Math.cos(a) * 24, y: cop.y + Math.sin(a) * 24,
+    vx: Math.cos(a) * 640, vy: Math.sin(a) * 640,
+    life: 0.8, fromPlayer: false,
+  });
+}
 
-  // Returns events: { hitPolice, hitPlayer, sparks: [{x,y}] }
-  update(dt, police, player, pedestrians, city) {
-    const events = { hitPolice: null, hitPlayer: false, sparks: [] };
-    this.cooldown = Math.max(0, this.cooldown - dt);
-    for (let i = this.bullets.length - 1; i >= 0; i--) {
-      const b = this.bullets[i];
-      b.life -= dt;
-      b.x += Math.cos(b.angle) * b.speed * dt;
-      b.y += Math.sin(b.angle) * b.speed * dt;
-      let dead = b.life <= 0;
-      // Bullets that left the world are gone even if their life remains.
-      if (b.x < 0 || b.y < 0 || b.x > WORLD.size || b.y > WORLD.size) dead = true;
-      if (city.pointInBuilding(b.x, b.y)) {
-        events.sparks.push({ x: b.x, y: b.y });
-        dead = true;
+export function stepBullets(combat, dt, world, cops, peds, player, fx, audio, onPlayerHit) {
+  if (combat.cooldown > 0) combat.cooldown -= dt;
+  if (combat.muzzle > 0) combat.muzzle -= dt;
+  const dead = [];
+  for (let i = 0; i < combat.bullets.length; i++) {
+    const b = combat.bullets[i];
+    b.x += b.vx * dt;
+    b.y += b.vy * dt;
+    b.life -= dt;
+    let hit = b.life <= 0;
+    if (!hit) {
+      // Gedung menghentikan peluru.
+      const wall = world.buildings.some((bd) => b.x > bd.x && b.x < bd.x + bd.w && b.y > bd.y && b.y < bd.y + bd.h);
+      if (wall) {
+        hit = true;
+        if (fx) fx.sparks(b.x, b.y, 5);
       }
-      if (!dead && b.from === 'player') {
-        const hit = police.damageNearest(b.x, b.y, 30, b.damage);
-        if (hit) {
-          events.hitPolice = hit;
-          events.sparks.push({ x: b.x, y: b.y });
-          dead = true;
-        }
-      }
-      if (!dead && b.from === 'police') {
-        const d = Math.hypot(b.x - player.x, b.y - player.y);
-        const radius = player.inCar ? 26 : 16;
-        if (d < radius) {
-          events.hitPlayer = true;
-          events.sparks.push({ x: b.x, y: b.y });
-          dead = true;
-        }
-      }
-      if (dead) this.bullets.splice(i, 1);
     }
-    return events;
+    if (!hit && b.fromPlayer) {
+      for (const cop of cops) {
+        if (dist(b.x, b.y, cop.x, cop.y) < 34) {
+          hit = true;
+          cop.hp = (cop.hp || 100) - PLAYER.bulletDamage;
+          if (fx) fx.sparks(b.x, b.y, 10);
+          if (cop.hp <= 0) {
+            cop.dead = true;
+            if (fx) fx.explosion(cop.x, cop.y);
+            if (audio) audio.crash(1);
+          }
+          break;
+        }
+      }
+      if (!hit) {
+        for (const p of peds) {
+          if (dist(b.x, b.y, p.x, p.y) < 14) {
+            hit = true;
+            p.panic = 2;
+            if (fx) fx.sparks(b.x, b.y, 4);
+            break;
+          }
+        }
+      }
+    }
+    if (!hit && !b.fromPlayer) {
+      const d = player.inCar
+        ? dist(b.x, b.y, player.car.x, player.car.y)
+        : dist(b.x, b.y, player.x, player.y);
+      const r = player.inCar ? 30 : 15;
+      if (d < r) {
+        hit = true;
+        if (fx) fx.sparks(b.x, b.y, 6);
+        if (onPlayerHit) onPlayerHit(PLAYER.bulletDamage * 0.4);
+      }
+    }
+    if (hit) dead.push(i);
+  }
+  for (let i = dead.length - 1; i >= 0; i--) combat.bullets.splice(dead[i], 1);
+  // Bersihkan polisi yang hancur.
+  for (let i = cops.length - 1; i >= 0; i--) {
+    if (cops[i].dead) cops.splice(i, 1);
   }
 }

@@ -1,91 +1,106 @@
-// SOLARA CITY v3 — config: all tuning in one place, written fresh for round 3.
-// Top-down open-world crime game. Night city, 2D canvas, no external assets.
+// SOLARA CITY — config.js
+// Satu-satunya sumber konstanta tuning game: dunia, kendaraan, polisi, misi,
+// ekonomi, dan rasa (shake, partikel, audio). Tidak ada logika di sini.
 
 export const WORLD = {
-  size: 3600,          // world is size x size px
-  roadGap: 450,        // distance between road centre lines
-  roadWidth: 116,
-  blockPad: 26,        // sidewalk margin inside a block
+  size: 4200,            // dunia persegi, piksel
+  block: 300,            // jarak antar persimpangan jalan
+  road: 96,              // lebar jalan
+  sidewalk: 26,          // lebar trotoar di sisi jalan
 };
 
-export const SAVE_KEY = 'solara-city-save-v3';
-
-export const GAME_VERSION = '3.0.0';
-
 export const PLAYER = {
-  walkSpeed: 185,
-  accel: 430,          // car acceleration px/s^2
-  brake: 700,
-  reverseMax: 190,
-  maxSpeed: 540,       // regular car
-  goldMaxSpeed: 640,   // gold coupe
-  turnRate: 2.9,       // rad/s at full steer (scaled by speed)
+  radius: 13,
+  walkSpeed: 235,
+  runSpeed: 330,
   health: 100,
-  radius: 15,
+  stealRange: 74,
+  shootCooldown: 0.16,
+  bulletSpeed: 780,
+  bulletDamage: 34,
+};
+
+export const CAR = {
+  length: 52,
+  width: 26,
+  accel: 520,
+  brake: 760,
+  reverseAccel: 300,
+  maxSpeed: 560,
+  maxReverse: 190,
+  turnRate: 2.9,         // radian/detik pada kecepatan penuh
+  grip: 3.4,             // seberapa cepat arah gerak mengikuti arah bodi
+  crashDamage: 9,
+  exhaustRate: 0.028,    // detik antar puff asap saat akselerasi
+};
+
+export const TRAFFIC = {
+  count: 16,
+  speed: 150,
+  colors: ['#c94f4f', '#4f7ec9', '#e0c35a', '#7a7f8a', '#5ab08a', '#b06ab0', '#d8d8d8'],
+};
+
+export const PEDS = {
+  count: 26,
+  speed: 52,
+  colors: ['#f2c14e', '#e07a5f', '#81b29a', '#f4f1de', '#9b5de5', '#00bbf9'],
+};
+
+export const WANTED = {
+  // level -> { polisi aktif, kecepatan polisi, agresivitas }
+  0: { cops: 0, copSpeed: 0,   aggression: 0 },
+  1: { cops: 2, copSpeed: 430, aggression: 0.55 },
+  2: { cops: 3, copSpeed: 480, aggression: 0.75 },
+  3: { cops: 5, copSpeed: 540, aggression: 1.0 },
+  max: 3,
 };
 
 export const MISSIONS = [
   {
-    id: 1, name: 'Paket Pertama', reward: 300,
-    kind: 'deliver',
-    brief: 'Ambil paket di titik kuning, antar ke titik hijau.',
+    id: 1, name: 'Paket Panas', reward: 300,
+    intro: 'Ambil paket di gudang utara, antar ke dermaga selatan.',
+    pickup: { x: 2100, y: 300 }, drop: { x: 2100, y: 3900 },
   },
   {
-    id: 2, name: 'Kabur dari Polisi', reward: 500,
-    kind: 'escape',
-    brief: 'Capai titik hijau sebelum timer habis. Polisi mengejarmu!',
-    timeLimit: 90, wanted: 2,
+    id: 2, name: 'Kabur dari Blokade', reward: 500, timeLimit: 75,
+    intro: 'Bawa paket ke atap parkir timur sebelum timer habis. Polisi mengejar!',
+    pickup: { x: 600, y: 600 }, drop: { x: 3900, y: 600 },
   },
   {
-    id: 3, name: 'Bertahan Hidup', reward: 800,
-    kind: 'survive',
-    brief: 'Bertahan 45 detik di wanted level 3. Jangan mati, jangan ketangkap!',
-    timeLimit: 45, wanted: 3,
+    id: 3, name: 'Badai Sirene', reward: 800, surviveSeconds: 45,
+    intro: 'Bertahan 45 detik di wanted 3. Jangan sampai tertangkap!',
+    pickup: null, drop: null,
   },
   {
     id: 4, name: 'Coupe Emas', reward: 1500,
-    kind: 'gold',
-    brief: 'Curi coupe emas dari tempat terjaga, bawa ke titik hijau. Ketangkap = gagal!',
-    wanted: 3,
+    intro: 'Curi coupe emas dari lot terjaga di barat, bawa ke penanda tanpa tertangkap.',
+    pickup: { x: 300, y: 2100 }, drop: { x: 3900, y: 3900 },
   },
 ];
 
-export const LEGEND_CASH = 3100; // 300 + 500 + 800 + 1500
-
-export const WANTED_COLORS = {
-  0: '#9aa5b1',
-  1: '#ffd23f', // yellow
-  2: '#ff8c1a', // orange
-  3: '#ff3b30', // red
+export const ECONOMY = {
+  legendTotal: 3100,     // total cash untuk SOLARA LEGEND
+  bustedFine: 120,       // denda saat busted
+  startCash: 0,
 };
 
+export const FEEL = {
+  shakeCrash: 13,
+  shakeShot: 2.5,
+  shakeHardTurn: 4,
+  skidMinSpeed: 300,
+  speedLineMin: 380,
+};
+
+export const SAVE_KEY = 'solara-city-save-v4';
 export const COLORS = {
-  night: '#0a0e1e',
-  asphalt: '#232838',
-  asphaltLine: '#3a4157',
-  roadMark: '#d8c95a',
-  sidewalk: '#2e3448',
-  grass: '#14301f',
-  grassDark: '#0f2417',
-  buildingRoof: '#39415e',
-  buildingRoof2: '#2c3350',
-  buildingRoof3: '#4a3f5e',
-  windowLit: '#ffd97a',
-  windowDark: '#1a2033',
-  parkPath: '#3a2f22',
-  gold: '#f5c542',
-  policeBlue: '#3b82f6',
-  policeRed: '#ef4444',
-};
-
-export const KEYS = {
-  up: ['KeyW', 'ArrowUp'],
-  down: ['KeyS', 'ArrowDown'],
-  left: ['KeyA', 'ArrowLeft'],
-  right: ['KeyD', 'ArrowRight'],
-  steal: ['KeyE'],
-  shoot: ['Space'],
-  pause: ['KeyP', 'Escape'],
-  start: ['Enter'],
-  restart: ['KeyR'],
+  asphalt: '#2b2f36',
+  asphaltLine: '#c8b45a',
+  sidewalk: '#55595f',
+  grass: '#3f7a44',
+  park: '#2f6b3a',
+  buildingRoof: '#8a7f72',
+  water: '#2e6f8e',
+  gold: '#f2c14e',
+  hudPanel: 'rgba(8, 12, 20, 0.72)',
 };

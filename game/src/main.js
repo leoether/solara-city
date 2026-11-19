@@ -1,635 +1,475 @@
-// SOLARA CITY v3 — entrypoint: boot screen → steal a car → 4 missions →
-// SOLARA LEGEND. Wires every module together: init(), loop(dt), handleInput(),
-// updateWanted(level), missions, rendering, audio, save. Written fresh for
-// round 3; no code reused from earlier rounds.
+// SOLARA CITY — main.js
+// Entrypoint game: state machine (boot/play/pause/busted/wasted/legend),
+// input keyboard+mouse, loop requestAnimationFrame, save/load localStorage,
+// dan hook debug window.__SOLARA untuk playtest & screenshot.
 
-import { WORLD, SAVE_KEY, MISSIONS, LEGEND_CASH, KEYS, GAME_VERSION } from './config.js';
-import { mulberry32, clamp } from './random.js';
-import { City } from './world.js';
-import { Traffic } from './vehicles.js';
-import { Pedestrians } from './pedestrians.js';
-import { Police } from './police.js';
-import { Player } from './player.js';
-import { MissionManager } from './missions.js';
-import { Combat } from './combat.js';
-import { SoundFX } from './audio.js';
-import { Renderer } from './render.js';
-import { drawHUD, drawBoot, drawPause, drawBusted, drawWasted, drawLegend } from './hud.js';
-import { applyShot } from './shots.js';
+import { WORLD, PLAYER, CAR, ECONOMY, SAVE_KEY, MISSIONS } from './config.js';
+import { clamp, dist, angleDiff } from './random.js';
+import { buildCity, resolveBuildingCollision } from './world.js';
+import { makeCar, stepPlayerCar, spawnTraffic, stepTraffic, spawnParkedCars } from './vehicles.js';
+import { spawnPeds, stepPeds } from './pedestrians.js';
+import { desiredCops, spawnCopNear, stepCop, checkBusted } from './police.js';
+import { createMissionState, currentMission, startMission, stepMissions, wantedFor, setBanner } from './missions.js';
+import { createCombat, shoot, copShoot, stepBullets } from './combat.js';
+import { createAudio } from './audio.js';
+import { createFx, createCamera, drawFrame } from './render.js';
+import { drawHud } from './hud.js';
+import { stageScene } from './shots.js';
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 
-function fitCanvas() {
+function resize() {
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
+  game.camera.w = canvas.width;
+  game.camera.h = canvas.height;
 }
-fitCanvas();
-window.addEventListener('resize', fitCanvas);
 
-const SPAWN = { x: WORLD.roadGap, y: WORLD.roadGap };
-
-const G = {
-  canvas,
-  mode: 'boot', // boot | playing | paused | busted | wasted | legend
+const game = {
   time: 0,
+  screen: 'boot',
+  paused: false,
+  city: buildCity(20261119),
+  camera: createCamera(window.innerWidth, window.innerHeight),
+  fx: createFx(),
+  audio: createAudio(),
+  combat: createCombat(),
+  missions: createMissionState(),
+  traffic: [],
+  peds: [],
+  parked: [],
+  cops: [],
   cash: 0,
   wanted: 0,
-  bustedLost: 0,
-  hitFlashT: 0,
-  toasts: [],
-  banner: null,
-  uiButtons: [],
+  stoleCar: false,
+  hint: '',
+  hintT: 0,
   hasSave: false,
-  saveCash: 0,
-  saveMission: 0,
-  keys: new Set(),
-  lastStealToast: -9,
-  lastRamT: -9,
-  exhaustT: 0,
-  prevRear: null,
-  city: null,
-  traffic: null,
-  peds: null,
-  police: null,
-  player: null,
-  missions: null,
-  combat: null,
-  renderer: null,
-  sound: new SoundFX(),
-  api: null,
+  bustedCash: 0,
+  checkpoint: null,
+  player: {
+    x: 2100, y: 2100, angle: 0, aimAngle: 0,
+    health: PLAYER.health, inCar: false, car: null,
+    shootHeld: false, mouseX: 0, mouseY: 0,
+  },
+  missionDef: null,
+  copShootT: 0,
+  saveT: 0,
 };
 
-function refreshSaveInfo() {
-  const s = loadSave();
-  G.hasSave = !!s;
-  G.saveCash = s ? s.cash : 0;
-  G.saveMission = s ? s.missionIndex : 0;
+game.traffic = spawnTraffic(game.city);
+game.peds = spawnPeds(game.city);
+game.parked = spawnParkedCars(game.city);
+// Coupe emas misi 4, diparkir di lot barat.
+game.goldCoupe = makeCar(300, 2100, Math.PI / 2, '#f2c14e', { parked: true, gold: true });
+game.parked.push(game.goldCoupe);
+
+const keys = {};
+let mouseDown = false;
+
+window.addEventListener('keydown', (e) => {
+  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault();
+  keys[e.key.toLowerCase()] = true;
+  game.audio.unlock();
+  handleKeyPress(e.key.toLowerCase());
+});
+window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
+canvas.addEventListener('mousemove', (e) => {
+  game.player.mouseX = e.clientX;
+  game.player.mouseY = e.clientY;
+});
+canvas.addEventListener('mousedown', (e) => {
+  if (e.button === 0) { mouseDown = true; game.audio.unlock(); }
+});
+window.addEventListener('mouseup', () => { mouseDown = false; });
+window.addEventListener('resize', resize);
+resize();
+
+function handleKeyPress(k) {
+  if (game.screen === 'boot' && (k === 'enter' || k === ' ')) { startGame(game.hasSave); return; }
+  if (game.screen === 'pause' && (k === 'p' || k === 'escape')) {
+    game.screen = 'play';
+    return;
+  }
+  if (game.screen === 'busted' || game.screen === 'wasted') {
+    if (k === 'enter') respawn();
+    return;
+  }
+  if (game.screen === 'legend' && k === 'enter') { game.screen = 'play'; return; }
+  if (game.screen !== 'play') return;
+  if (k === 'p' || k === 'escape') { game.screen = 'pause'; game.audio.engineOff(); return; }
+  if (k === 'm') {
+    if (game.missions.phase === 'idle' && currentMission(game.missions)) {
+      startMission(game.missions, game.audio);
+      game.wanted = Math.max(game.wanted, wantedFor(game.missions, game.stoleCar));
+    }
+    return;
+  }
+  if (k === 'e') tryStealOrExit();
+  if (k === 'r' && game.checkpoint) loadCheckpoint();
 }
 
-function saveGame(legend = false) {
+function startGame(fromSave) {
+  game.audio.unlock();
+  if (fromSave) {
+    const ok = loadSave();
+    if (!ok) resetRun();
+  } else {
+    resetRun();
+  }
+  game.screen = 'play';
+  setBanner(game.missions, 'Selamat datang di Solara', 'Curi mobil dengan E, tekan M untuk misi pertama.');
+}
+
+function resetRun() {
+  game.cash = 0;
+  game.wanted = 0;
+  game.stoleCar = false;
+  game.missions = createMissionState();
+  game.player.x = 2100; game.player.y = 2100;
+  game.player.health = PLAYER.health;
+  game.player.inCar = false;
+  game.player.car = null;
+  game.cops.length = 0;
+  game.combat.bullets.length = 0;
+  saveCheckpoint();
+}
+
+function saveCheckpoint() {
+  game.checkpoint = {
+    cash: game.cash, missionIndex: game.missions.index,
+    x: game.player.x, y: game.player.y, health: game.player.health,
+  };
+}
+
+function loadCheckpoint() {
+  const c = game.checkpoint;
+  if (!c) return;
+  game.cash = c.cash;
+  game.missions.index = c.missionIndex;
+  game.missions.phase = 'idle';
+  game.player.x = c.x; game.player.y = c.y;
+  game.player.health = c.health;
+  game.player.inCar = false;
+  game.player.car = null;
+  game.cops.length = 0;
+  game.wanted = 0;
+  game.screen = 'play';
+}
+
+function respawn() {
+  const fine = Math.min(game.cash, ECONOMY.bustedFine);
+  game.bustedCash = fine;
+  game.cash -= fine;
+  game.player.health = PLAYER.health;
+  game.player.x = 2100; game.player.y = 2100;
+  game.player.inCar = false;
+  game.player.car = null;
+  game.cops.length = 0;
+  game.wanted = 0;
+  game.missions.phase = 'idle';
+  game.screen = 'play';
+  saveGame();
+}
+
+// ---- Save / load ----
+
+function saveGame() {
   try {
-    const data = {
-      v: 3,
-      cash: G.cash,
-      missionIndex: G.missions ? G.missions.index : 0,
-      legend: !!legend,
-      savedAt: Date.now(),
-    };
-    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
-    refreshSaveInfo();
-  } catch { /* storage unavailable — game still runs */ }
+    localStorage.setItem(SAVE_KEY, JSON.stringify({
+      cash: game.cash,
+      missionIndex: game.missions.index,
+      x: game.player.x, y: game.player.y,
+      health: game.player.health,
+      time: Date.now(),
+    }));
+    game.hasSave = true;
+  } catch (e) { /* penyimpanan penuh / privat: lanjut tanpa save */ }
 }
 
 function loadSave() {
   try {
     const raw = localStorage.getItem(SAVE_KEY);
-    if (!raw) return null;
-    const d = JSON.parse(raw);
-    if (!d || d.v !== 3) return null;
-    return d;
-  } catch {
-    return null;
+    if (!raw) return false;
+    const s = JSON.parse(raw);
+    game.cash = s.cash || 0;
+    game.missions.index = Math.min(s.missionIndex || 0, MISSIONS.length);
+    game.player.x = s.x ?? 2100;
+    game.player.y = s.y ?? 2100;
+    game.player.health = s.health || PLAYER.health;
+    game.checkpoint = { cash: game.cash, missionIndex: game.missions.index, x: game.player.x, y: game.player.y, health: game.player.health };
+    return true;
+  } catch (e) { return false; }
+}
+
+game.hasSave = (() => {
+  try { return !!localStorage.getItem(SAVE_KEY); } catch (e) { return false; }
+})();
+
+// ---- Aksi pemain ----
+
+function nearestStealable() {
+  const P = game.player;
+  let best = null, bestD = PLAYER.stealRange;
+  for (const c of game.parked) {
+    const d = dist(P.x, P.y, c.x, c.y);
+    if (d < bestD) { best = c; bestD = d; }
   }
+  return best;
 }
 
-function toast(text, color, dur = 2.8) {
-  G.toasts.push({ text, color: color || '#e6e9f2', t: G.time, dur });
-  if (G.toasts.length > 4) G.toasts.shift();
-}
-
-function showBanner(text, sub, color) {
-  G.banner = { text, sub: sub || '', t: G.time, until: G.time + 2.4, color: color || '#ffd23f' };
-}
-
-// Wanted level: stars, police count, siren. Police sync runs every frame.
-function updateWanted(level) {
-  G.wanted = clamp(level, 0, 3);
-  if (G.wanted > 0 && G.mode === 'playing') G.sound.startSiren();
-  else if (G.wanted === 0) G.sound.stopSiren();
-}
-
-function freshWorld() {
-  G.city = new City(1337);
-  G.traffic = new Traffic(G.city);
-  G.peds = new Pedestrians(G.city);
-  G.police = new Police(G.city);
-  G.combat = new Combat();
-  G.player = new Player(G.city, SPAWN.x, SPAWN.y);
-  G.missions = new MissionManager(G.city, mulberry32(999));
-  if (!G.renderer) G.renderer = new Renderer(canvas, G.city);
-  G.renderer.city = G.city;
-  G.renderer.particles.length = 0;
-  G.renderer.skids.length = 0;
-  G.renderer.snapTo(SPAWN.x, SPAWN.y);
-}
-
-function startGame(save) {
-  freshWorld();
-  G.cash = save ? save.cash : 0;
-  G.wanted = 0;
-  G.mode = 'playing';
-  G.toasts = [];
-  G.banner = null;
-  G.hitFlashT = 0;
-  G.bustedLost = 0;
-  G.prevRear = null;
-  G.player.reset(SPAWN.x, SPAWN.y);
-  // A stealable car is always parked right by the spawn, so the first
-  // steal never depends on traffic luck.
-  G.traffic.spawnParkedAt(SPAWN.x + 96, SPAWN.y + 8, 0);
-  const startIndex = save ? clamp(save.missionIndex, 0, MISSIONS.length) : 0;
-  if (startIndex >= MISSIONS.length) {
-    // Save with every mission done: free roam as a legend, no active mission.
-    G.missions.index = MISSIONS.length;
-    updateWanted(0);
-  } else {
-    G.missions.start(startIndex, { x: SPAWN.x, y: SPAWN.y }, G.traffic);
-    updateWanted(G.missions.current ? G.missions.current.wanted || 0 : 0);
-  }
-  G.sound.ensure();
-  G.sound.startEngine();
-  const m = G.missions.current;
-  if (m) toast(`Misi ${m.id}/4: ${m.name} — ${m.brief}`, '#f5c542', 4);
-  if (save && save.legend) toast('Save LEGEND dimuat — selamat datang kembali, Legenda.', '#7ee787', 4);
-}
-
-function finishMission(reward) {
-  G.cash += reward;
-  showBanner('MISI SELESAI', `+$${reward}`, '#7ee787');
-  G.sound.cash();
-  saveGame(false);
-  if (G.cash >= LEGEND_CASH) {
-    doLegend();
+function tryStealOrExit() {
+  const P = game.player;
+  if (P.inCar) {
+    // Keluar mobil.
+    P.inCar = false;
+    const a = P.car.angle + Math.PI / 2;
+    P.x = P.car.x + Math.cos(a) * 40;
+    P.y = P.car.y + Math.sin(a) * 40;
+    P.car.speed = 0;
+    P.car.vx = 0; P.car.vy = 0;
+    game.audio.engineOff();
     return;
   }
-  const next = G.missions.index;
-  G.missions.start(next, { x: G.player.x, y: G.player.y }, G.traffic);
-  updateWanted(G.missions.current ? G.missions.current.wanted || 0 : G.wanted);
-  const m = G.missions.current;
-  if (m) toast(`Misi ${m.id}/4: ${m.name} — ${m.brief}`, '#f5c542', 4);
-}
-
-function failMission(reason) {
-  showBanner('MISI GAGAL', reason || 'Coba lagi!', '#ff6b6b');
-  toast(reason || 'Misi gagal — coba lagi.', '#ff6b6b');
-  if (G.missions.current && G.missions.current.kind === 'gold') {
-    G.traffic.cars = G.traffic.cars.filter((c) => !c.gold);
-  }
-  G.missions.restartCurrent({ x: G.player.x, y: G.player.y }, G.traffic);
-  updateWanted(G.missions.current ? G.missions.current.wanted || 0 : 0);
-}
-
-function doBusted() {
-  if (G.mode !== 'playing') return;
-  G.mode = 'busted';
-  const lost = G.cash > 0 ? Math.min(G.cash, Math.max(50, Math.round(G.cash * 0.1))) : 0;
-  G.cash -= lost;
-  G.bustedLost = lost;
-  G.sound.busted();
-  G.sound.stopEngine();
-  G.sound.stopSiren();
-  if (G.player.inCar) G.player.exitCar();
-  if (G.missions.current && G.missions.current.kind === 'gold') {
-    toast('Misi Coupe Emas gagal — kamu ketangkap!', '#ff6b6b', 4);
-  }
-}
-
-function doRespawn() {
-  G.police.cars = [];
-  G.player.reset(SPAWN.x, SPAWN.y);
-  G.player.health = 100;
-  G.wanted = 0;
-  if (G.missions.current && G.missions.current.kind === 'gold') {
-    G.traffic.cars = G.traffic.cars.filter((c) => !c.gold);
-  }
-  G.missions.restartCurrent({ x: SPAWN.x, y: SPAWN.y }, G.traffic);
-  updateWanted(G.missions.current ? G.missions.current.wanted || 0 : 0);
-  G.mode = 'playing';
-  G.sound.ensure();
-  G.sound.startEngine();
-  toast('Respawn — misi aktif diulang.', '#e6e9f2');
-}
-
-function doWasted() {
-  if (G.mode !== 'playing') return;
-  G.mode = 'wasted';
-  G.sound.wasted();
-  G.sound.stopEngine();
-  G.sound.stopSiren();
-  if (G.player.inCar) G.player.exitCar();
-}
-
-function doRetry() {
-  const save = loadSave();
-  startGame(save);
-  toast(save ? 'Checkpoint dimuat.' : 'Mulai dari awal.', '#e6e9f2');
-}
-
-function doLegend() {
-  G.mode = 'legend';
-  G.sound.legend();
-  G.sound.stopEngine();
-  G.sound.stopSiren();
-  saveGame(true);
-}
-
-function stealCar() {
-  if (G.mode !== 'playing') return;
-  const p = G.player;
-  if (p.inCar) {
-    if (Math.abs(p.carSpeed) > 60) {
-      if (G.time - G.lastStealToast > 1.5) {
-        toast('Terlalu cepat untuk keluar!', '#ff6b6b');
-        G.lastStealToast = G.time;
-      }
-      return;
+  const target = nearestStealable();
+  if (target) {
+    game.parked = game.parked.filter((c) => c !== target);
+    target.parked = false;
+    target.isPlayer = true;
+    P.car = target;
+    P.inCar = true;
+    P.x = target.x; P.y = target.y;
+    if (!game.stoleCar) {
+      game.stoleCar = true;
+      game.wanted = Math.max(game.wanted, 1);
+      setBanner(game.missions, 'MOBIL DICURI!', 'Wanted level 1 — polisi mengejar!');
+      game.audio.crash(0.4);
     }
-    p.exitCar();
-    G.sound.click();
-    return;
-  }
-  // Mission 4: the gold coupe is the objective — if it is in reach, it is
-  // always the steal, even if another car happens to be a few px closer.
-  // (Without this, a traffic car parked beside the lot could be stolen
-  // instead and the mission would never advance.)
-  let car = null;
-  const m = G.missions.current;
-  if (m && m.kind === 'gold' && G.missions.stage === 'pickup' && G.missions.goldCar) {
-    const gc = G.missions.goldCar;
-    if (!gc.wrecked && Math.hypot(gc.x - p.x, gc.y - p.y) < 120) car = gc;
-  }
-  if (!car) car = G.traffic.nearestStealable(p.x, p.y, 82);
-  if (!car) {
-    if (G.time - G.lastStealToast > 1.5) {
-      toast('Tidak ada mobil di dekatmu.', '#9aa5b1');
-      G.lastStealToast = G.time;
+    if (target.gold) {
+      setBanner(game.missions, 'COUPE EMAS DICURI!', 'Bawa ke penanda hijau. Jangan tertangkap!');
     }
-    return;
   }
-  p.enterCar(car);
-  G.sound.click();
-  if (car.gold) {
-    const ev = G.missions.onSteal(car);
-    if (ev) {
-      toast('Coupe emas dicuri! Bawa ke titik hijau!', '#f5c542', 4);
-      showBanner('COUPE EMAS DICURI', 'Bawa ke titik hijau — jangan ketangkap!', '#f5c542');
+}
+
+function updateWanted(dt) {
+  const want = desiredCops(game.wanted);
+  if (game.cops.length < want) {
+    game.cops.push(spawnCopNear(game.city, game.player.x, game.player.y, 900));
+  } else if (game.cops.length > want) {
+    game.cops.pop();
+  }
+  // Polisi yang terlalu jauh di-respawn lebih dekat.
+  for (let i = 0; i < game.cops.length; i++) {
+    const c = game.cops[i];
+    if (dist(c.x, c.y, game.player.x, game.player.y) > 1800) {
+      game.cops[i] = spawnCopNear(game.city, game.player.x, game.player.y, 900);
     }
-  } else {
-    toast('Mobil dicuri! Wanted ★ naik.', '#ffd23f');
-  }
-  if (G.wanted < 1) updateWanted(1);
-}
-
-function shoot() {
-  if (G.mode !== 'playing') return;
-  const p = G.player;
-  const b = G.combat.playerShoot(p.x, p.y, p.angle);
-  if (!b) return;
-  G.sound.shot();
-  G.renderer.spawnFlash(b.x, b.y);
-  G.renderer.addShake(2);
-  G.peds.scare(p.x, p.y, 300);
-}
-
-function togglePause() {
-  if (G.mode === 'playing') {
-    G.mode = 'paused';
-    G.sound.setEngine(0, false);
-  } else if (G.mode === 'paused') {
-    G.mode = 'playing';
-    G.sound.ensure();
-    G.sound.startEngine();
   }
 }
 
-function handleButton(id) {
-  G.sound.ensure();
-  G.sound.click();
-  if (id === 'start') startGame(null);
-  else if (id === 'continue') startGame(loadSave());
-  else if (id === 'resume') togglePause();
-  else if (id === 'restart') startGame(null);
-  else if (id === 'quit') { G.mode = 'boot'; refreshSaveInfo(); }
-  else if (id === 'respawn') doRespawn();
-  else if (id === 'retry') doRetry();
-  else if (id === 'freeroam') { G.mode = 'playing'; updateWanted(0); G.sound.ensure(); G.sound.startEngine(); }
-  else if (id === 'again') startGame(null);
+function playerHit(dmg) {
+  const P = game.player;
+  P.health -= dmg;
+  game.fx.addShake(6);
+  if (P.health <= 0) {
+    P.health = 0;
+    game.audio.wasted();
+    game.screen = 'wasted';
+    game.audio.engineOff();
+  }
 }
 
-function readInput() {
-  const k = G.keys;
-  const has = (list) => list.some((c) => k.has(c));
+function inputState() {
   return {
-    up: has(KEYS.up),
-    down: has(KEYS.down),
-    left: has(KEYS.left),
-    right: has(KEYS.right),
+    up: !!(keys['w'] || keys['arrowup']),
+    down: !!(keys['s'] || keys['arrowdown']),
+    left: !!(keys['a'] || keys['arrowleft']),
+    right: !!(keys['d'] || keys['arrowright']),
+    run: !!keys['shift'],
   };
 }
 
-function update(dt) {
-  G.time += dt;
-  G.hitFlashT = Math.max(0, G.hitFlashT - dt);
-  G.renderer.updateFx(dt);
-  if (G.mode !== 'playing') return;
-  const input = readInput();
-  const p = G.player;
-  p.update(dt, input, G.time);
-  G.traffic.update(dt, p.car);
-  G.peds.update(dt, { x: p.x, y: p.y }, p.speed);
-  // Police: keep count matched to wanted, then chase / shoot / bust.
-  G.police.sync(G.wanted, p.x, p.y);
-  const pev = G.police.update(dt, G.wanted, p);
-  if (pev.ram && G.time - G.lastRamT > 0.7) {
-    G.lastRamT = G.time;
-    p.hurt(p.inCar ? 4 : 8, G.time);
-    G.renderer.addShake(p.inCar ? 7 : 10);
-    G.renderer.spawnSparks(p.x, p.y, 8);
-    G.sound.crash(0.5);
-    G.hitFlashT = 0.3;
-  }
-  for (const s of pev.shots) {
-    G.combat.policeShoot(s.x, s.y, s.angle);
-    G.sound.policeShot();
-  }
-  if (pev.busted) {
-    doBusted();
-    return;
-  }
-  // Combat: bullets vs police cars / player.
-  const cev = G.combat.update(dt, G.police, p, G.peds, G.city);
-  for (const s of cev.sparks) G.renderer.spawnSparks(s.x, s.y, 5);
-  if (cev.hitPolice) {
-    G.renderer.addShake(3);
-    if (cev.hitPolice.wrecked) {
-      toast('Mobil polisi hancur!', '#7ee787');
-      G.renderer.spawnSparks(cev.hitPolice.x, cev.hitPolice.y, 22);
-    }
-    if (G.wanted < 3) updateWanted(G.wanted + 1);
-  }
-  if (cev.hitPlayer) {
-    p.hurt(9, G.time);
-    G.hitFlashT = 0.45;
-    G.renderer.addShake(5);
-  }
-  // Crash damage from the player's own driving.
-  const cs = p.crashSpeed || 0;
-  if (cs > 380) {
-    p.hurt(Math.min(24, Math.round((cs - 380) / 12)), G.time);
-    G.renderer.addShake(16);
-    G.renderer.spawnSparks(p.x, p.y, 18);
-    G.sound.crash(1);
-    G.hitFlashT = 0.35;
-  } else if (cs > 200) {
-    G.renderer.addShake(6);
-    G.renderer.spawnSparks(p.x, p.y, 6);
-    G.sound.crash(0.4);
-  }
-  if (p.health <= 0) {
-    doWasted();
-    return;
-  }
-  // Exhaust smoke + skid marks + brake dust while driving.
-  if (p.inCar && p.car) {
-    const spd = Math.abs(p.carSpeed);
-    if (input.up && spd > 50) {
-      G.exhaustT += dt;
-      if (G.exhaustT > 0.06) {
-        G.exhaustT = 0;
-        const bx = p.car.x - Math.cos(p.car.angle) * 26;
-        const by = p.car.y - Math.sin(p.car.angle) * 26;
-        G.renderer.spawnSmoke(bx, by, -Math.cos(p.car.angle) * 30, -Math.sin(p.car.angle) * 30);
-      }
-    }
-    const drifting = spd > 260 && Math.abs(p.steer) > 0.6;
-    const hardBrake = input.down && spd > 300;
-    if (drifting || hardBrake) {
-      const rx = p.car.x - Math.cos(p.car.angle) * 18;
-      const ry = p.car.y - Math.sin(p.car.angle) * 18;
-      if (G.prevRear) G.renderer.addSkid(G.prevRear.x, G.prevRear.y, rx, ry);
-      G.prevRear = { x: rx, y: ry };
-      if (hardBrake) G.renderer.spawnDust(rx, ry);
-    } else {
-      G.prevRear = null;
-    }
-  }
-  // Missions.
-  const mev = G.missions.update(dt, p, G.traffic);
-  if (mev) {
-    if (mev.event === 'complete') finishMission(mev.reward);
-    else if (mev.event === 'fail') failMission(mev.reason);
-    else if (mev.event === 'pickup') {
-      toast('Paket diambil! Antar ke titik hijau.', '#7ee787');
-      G.sound.cash();
-    }
-  }
-  // Siren + engine follow the live state.
-  if (G.wanted > 0) G.sound.startSiren();
-  else G.sound.stopSiren();
-  G.sound.setEngine(p.inCar ? Math.min(1, Math.abs(p.carSpeed) / 540) : 0, p.inCar);
-  G.renderer.follow(p.x, p.y, dt);
-  // Toast expiry.
-  G.toasts = G.toasts.filter((t) => G.time - t.t < t.dur);
-}
+// ---- Loop utama ----
 
-// ---- input ----
-window.addEventListener('keydown', (e) => {
-  if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
-  if (e.repeat) return;
-  G.keys.add(e.code);
-  if (e.code === 'Enter') {
-    if (G.mode === 'boot') handleButton('start');
-    else if (G.mode === 'paused') handleButton('resume');
-    else if (G.mode === 'busted') handleButton('respawn');
-    else if (G.mode === 'wasted') handleButton('retry');
-    else if (G.mode === 'legend') handleButton('freeroam');
-  } else if (e.code === 'KeyC' && G.mode === 'boot' && G.hasSave) {
-    handleButton('continue');
-  } else if (e.code === 'KeyE') {
-    G.sound.ensure();
-    stealCar();
-  } else if (e.code === 'Space') {
-    G.sound.ensure();
-    shoot();
-  } else if (e.code === 'KeyP' || e.code === 'Escape') {
-    togglePause();
-  } else if (e.code === 'KeyR' && G.mode === 'paused') {
-    handleButton('restart');
-  }
-});
-window.addEventListener('keyup', (e) => G.keys.delete(e.code));
-window.addEventListener('blur', () => G.keys.clear());
-canvas.addEventListener('click', (e) => {
-  const r = canvas.getBoundingClientRect();
-  const x = e.clientX - r.left;
-  const y = e.clientY - r.top;
-  for (const b of G.uiButtons || []) {
-    if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) {
-      handleButton(b.id);
-      return;
-    }
-  }
-  G.sound.ensure();
-});
+function init() { /* init(): siapkan state awal — dipanggil sekali di bawah */ }
+init();
 
-// ---- public API: driving hooks for the headless playtest + ?shot= staging ----
-G.api = {
-  version: GAME_VERSION,
-  start: () => startGame(null),
-  continueGame: () => startGame(loadSave()),
-  state() {
-    const m = G.missions ? G.missions.current : null;
-    return {
-      mode: G.mode,
-      time: Math.round(G.time * 10) / 10,
-      cash: G.cash,
-      wanted: G.wanted,
-      missionIndex: G.missions ? G.missions.index : 0,
-      missionKind: m ? m.kind : null,
-      missionStage: G.missions ? G.missions.stage : null,
-      target: G.missions ? G.missions.target : null,
-      timeLeft: G.missions ? Math.ceil(G.missions.timeLeft) : 0,
-      timeLeftRaw: G.missions ? Math.round(G.missions.timeLeft * 10) / 10 : 0,
-      player: {
-        x: Math.round(G.player ? G.player.x : 0),
-        y: Math.round(G.player ? G.player.y : 0),
-        inCar: G.player ? G.player.inCar : false,
-        health: G.player ? Math.round(G.player.health) : 0,
-        speed: G.player ? Math.round(G.player.speed) : 0,
-        gold: G.player && G.player.car ? !!G.player.car.gold : false,
-      },
-      police: G.police ? G.police.cars.filter((c) => !c.wrecked).length : 0,
-      bullets: G.combat ? G.combat.bullets.length : 0,
-      legend: G.cash >= LEGEND_CASH,
-      hasSave: G.hasSave,
-    };
-  },
-  steal: () => stealCar(),
-  shoot: () => shoot(),
-  pauseToggle: () => togglePause(),
-  respawn: () => doRespawn(),
-  retry: () => doRetry(),
-  freeroam: () => { G.mode = 'playing'; updateWanted(0); },
-  legend: () => doLegend(),
-  teleport(x, y) {
-    if (!G.player) return;
-    G.player.x = x;
-    G.player.y = y;
-    if (G.player.inCar && G.player.car) { G.player.car.x = x; G.player.car.y = y; }
-    G.renderer.snapTo(x, y);
-  },
-  teleportToRoad() {
-    const p = G.city.randomRoadPoint(Math.random);
-    this.teleport(p.x, p.y);
-  },
-  teleportToTarget() {
-    const t = G.missions && G.missions.target;
-    if (t) this.teleport(t.x, t.y);
-  },
-  giveCar() {
-    if (!G.player || G.player.inCar) return;
-    const car = G.traffic.spawnParkedAt(G.player.x + 60, G.player.y, 0);
-    G.player.x = car.x - 50;
-    G.player.y = car.y;
-    stealCar();
-  },
-  enterNearestCar: () => stealCar(),
-  spawnGoldNear() {
-    const c = G.traffic.spawnGoldCoupe(G.player.x + 260, G.player.y + 40);
-    return c.id;
-  },
-  setCarSpeed(v) {
-    if (G.player && G.player.inCar) G.player.carSpeed = v;
-  },
-  setCash(n) { G.cash = n; },
-  setMission(i) {
-    G.missions.start(i, { x: G.player.x, y: G.player.y }, G.traffic);
-    updateWanted(G.missions.current ? G.missions.current.wanted || 0 : G.wanted);
-  },
-  completeCurrentMission() {
-    const m = G.missions.current;
-    if (!m) return false;
-    const reward = m.reward;
-    G.missions.index += 1;
-    G.missions.stage = 'pickup';
-    G.missions.target = null;
-    G.missions.goldCar = null;
-    finishMission(reward);
-    return true;
-  },
-  setWanted(n) { updateWanted(n); },
-  setHealth(n) { if (G.player) G.player.health = n; },
-  damage(n) { if (G.player) G.player.hurt(n, G.time); },
-  bust: () => doBusted(),
-  waste: () => doWasted(),
-  placePoliceNear(n, dist) {
-    if (!G.police) return;
-    G.police.cars = [];
-    for (let i = 0; i < n; i++) {
-      const a = (i / n) * Math.PI * 2;
-      const p = G.city.nearestRoadPoint(G.player.x + Math.cos(a) * dist, G.player.y + Math.sin(a) * dist);
-      const c = G.police._spawnOne(G.player.x, G.player.y);
-      c.x = p.x;
-      c.y = p.y;
-      c.angle = Math.atan2(G.player.y - p.y, G.player.x - p.x);
-      c.speed = 200;
-    }
-  },
-  fireDemoShots() {
-    for (let i = 0; i < 3; i++) {
-      const a = G.player.angle + (i - 1) * 0.35;
-      const b = G.combat.playerShoot(G.player.x, G.player.y, a);
-      if (b) G.renderer.spawnFlash(b.x, b.y);
-    }
-    for (let i = 0; i < 2; i++) {
-      const a = Math.atan2(G.player.y - (G.player.y - 200), G.player.x - (G.player.x + 200));
-      G.combat.policeShoot(G.player.x + 200, G.player.y - 200 + i * 90, a + 0.2);
-    }
-    G.renderer.addShake(5);
-  },
-  showBanner: (t, s, c) => showBanner(t, s, c),
-  toast: (t, c) => toast(t, c),
-  save: () => saveGame(false),
-  clearSave() {
-    try { localStorage.removeItem(SAVE_KEY); } catch { /* ignore */ }
-    refreshSaveInfo();
-  },
-  shot: (name) => applyShot(G, name),
-};
-
-// ---- boot ----
-refreshSaveInfo();
-freshWorld();
-G.mode = 'boot';
-
-let lastTs = 0;
-function loop(ts) {
-  const dt = lastTs ? Math.min(0.05, (ts - lastTs) / 1000) : 0.016;
-  lastTs = ts;
-  update(dt);
-  G.renderer.render(G);
-  if (G.mode === 'boot') drawBoot(ctx, G);
-  else if (G.mode === 'paused') { drawHUD(ctx, G); drawPause(ctx, G); }
-  else if (G.mode === 'busted') drawBusted(ctx, G);
-  else if (G.mode === 'wasted') drawWasted(ctx, G);
-  else if (G.mode === 'legend') { drawHUD(ctx, G); drawLegend(ctx, G); }
-  else drawHUD(ctx, G);
+let last = performance.now();
+function loop(now) {
   requestAnimationFrame(loop);
+  let dt = (now - last) / 1000;
+  last = now;
+  if (dt > 0.05) dt = 0.05;
+  if (game.screen === 'play' && !game.paused) {
+    game.time += dt;
+    update(dt);
+  }
+  drawFrame(ctx, game, game.fx, dt);
+  drawHud(ctx, game);
+  game.fx.step(dt);
 }
 requestAnimationFrame(loop);
 
-// Screenshot staging via ?shot=name (used by the playtest, never by players).
-const shotName = new URLSearchParams(window.location.search).get('shot');
-if (shotName) {
-  setTimeout(() => {
-    try {
-      const ok = applyShot(G, shotName);
-      window.__solaraShot = ok ? shotName : 'failed:' + shotName;
-    } catch (err) {
-      window.__solaraShot = 'error:' + String(err && err.message ? err.message : err);
+function update(dt) {
+  const P = game.player;
+  const input = inputState();
+  game.missionDef = currentMission(game.missions);
+
+  // Arah bidik: mouse di layar vs posisi pemain di layar.
+  const psx = P.x - game.camera.x;
+  const psy = P.y - game.camera.y;
+  P.aimAngle = Math.atan2(P.mouseY - psy, P.mouseX - psx);
+
+  if (P.inCar && P.car) {
+    const res = stepPlayerCar(P.car, input, dt, game.city, game.fx);
+    P.x = P.car.x; P.y = P.car.y;
+    P.angle = P.car.angle;
+    if (res.crashed) {
+      game.audio.crash(res.strength);
+      game.fx.addShake(10 * res.strength + 4);
+      playerHit(CAR.crashDamage * res.strength);
+      if (game.screen !== 'play') return;
     }
-  }, 400);
+    // Debu saat rem mendadak.
+    if (input.down && Math.abs(P.car.speed) > 200 && Math.random() < 0.3) {
+      game.fx.dust(P.car.x - Math.cos(P.car.angle) * 24, P.car.y - Math.sin(P.car.angle) * 24);
+    }
+    const rpm = Math.abs(P.car.speed) / CAR.maxSpeed;
+    game.audio.engine(rpm, input.up ? 1 : 0);
+    // Tembak dari mobil: klik mouse.
+    if (mouseDown) {
+      shoot(game.combat, P.car.x, P.car.y, P.aimAngle, game.fx, game.audio);
+      game.fx.addShake(1.5);
+    }
+  } else {
+    const speed = input.run ? PLAYER.runSpeed : PLAYER.walkSpeed;
+    let mx = (input.right ? 1 : 0) - (input.left ? 1 : 0);
+    let my = (input.down ? 1 : 0) - (input.up ? 1 : 0);
+    const len = Math.hypot(mx, my);
+    if (len > 0) { mx /= len; my /= len; }
+    const nx = P.x + mx * speed * dt;
+    const ny = P.y + my * speed * dt;
+    const fixed = resolveBuildingCollision(game.city, nx, ny, PLAYER.radius);
+    P.x = fixed.x; P.y = fixed.y;
+    if (len > 0) P.angle = Math.atan2(my, mx);
+    game.audio.engineOff();
+    if (mouseDown || keys[' ']) {
+      if (shoot(game.combat, P.x, P.y, P.aimAngle, game.fx, game.audio)) game.fx.addShake(1.5);
+    }
+    // Hint curi mobil.
+    const near = nearestStealable();
+    if (near) {
+      game.hint = near.gold ? 'Tekan E — curi COUPE EMAS' : 'Tekan E — curi mobil';
+      game.hintT = 0.2;
+    }
+  }
+
+  // Misi.
+  stepMissions(game.missions, P, dt, {
+    audio: game.audio,
+    onReward: (m, amount) => {
+      game.cash += amount;
+      saveCheckpoint();
+      saveGame();
+    },
+    onFail: (reason) => {
+      setBanner(game.missions, 'MISI GAGAL', reason + ' Tekan M untuk coba lagi.');
+      game.wanted = Math.max(game.wanted, 1);
+    },
+    onLegend: () => {
+      game.screen = 'legend';
+      game.audio.legend();
+      saveGame();
+    },
+  });
+  if (game.screen !== 'play') return;
+
+  // Wanted naik mengikuti progres misi.
+  game.wanted = Math.max(game.wanted, wantedFor(game.missions, game.stoleCar));
+  if (game.missions.index >= MISSIONS.length) game.wanted = 0;
+
+  // Polisi.
+  updateWanted(dt);
+  const px = P.inCar ? P.car.x : P.x;
+  const py = P.inCar ? P.car.y : P.y;
+  for (const cop of game.cops) {
+    stepCop(cop, px, py, game.wanted, dt, game.city, game.fx);
+    // Tabrakan polisi vs mobil pemain.
+    if (P.inCar && dist(cop.x, cop.y, P.car.x, P.car.y) < 46) {
+      P.car.speed *= 0.55;
+      game.fx.addShake(5);
+      game.audio.crash(0.3);
+    }
+  }
+  // Polisi menembak di wanted 3.
+  game.copShootT -= dt;
+  if (game.wanted >= 3 && game.cops.length > 0 && game.copShootT <= 0) {
+    game.copShootT = 0.9 + Math.random() * 0.8;
+    const cop = game.cops[Math.floor(Math.random() * game.cops.length)];
+    if (dist(cop.x, cop.y, px, py) < 520) copShoot(game.combat, cop, px, py);
+  }
+  game.audio.siren(dt, game.cops.length > 0);
+
+  // Busted?
+  const buster = checkBusted(game.cops, { x: px, y: py, inCar: P.inCar, car: P.car });
+  if (buster) {
+    game.audio.busted();
+    game.screen = 'busted';
+    game.audio.engineOff();
+    return;
+  }
+
+  // Peluru.
+  const danger = game.combat.bullets.length > 0
+    ? { x: game.combat.bullets[0].x, y: game.combat.bullets[0].y }
+    : null;
+  stepBullets(game.combat, dt, game.city, game.cops, game.peds, P, game.fx, game.audio, playerHit);
+  if (game.screen !== 'play') return;
+
+  // Traffic + pejalan.
+  stepTraffic(game.traffic, dt, game.city);
+  stepPeds(game.peds, dt, game.city, danger);
+
+  // Hint timeout.
+  if (game.hintT > 0) { game.hintT -= dt; if (game.hintT <= 0) game.hint = ''; }
+  else if (!nearestStealable() || P.inCar) game.hint = '';
+
+  // Autosave berkala.
+  game.saveT += dt;
+  if (game.saveT > 20) { game.saveT = 0; saveGame(); }
 }
-window.SOLARA = G.api;
-window.__solaraReady = true;
+
+// ---- Hook debug untuk playtest & screenshot (bukan cheat untuk pemain) ----
+window.__SOLARA = {
+  game,
+  version: 'v4-fresh',
+  start(fromSave) { startGame(!!fromSave); },
+  stage(scene) { stageScene(game, scene); },
+  state() {
+    return {
+      screen: game.screen,
+      cash: game.cash,
+      wanted: game.wanted,
+      missionIndex: game.missions.index,
+      missionPhase: game.missions.phase,
+      health: game.player.health,
+      inCar: game.player.inCar,
+      cops: game.cops.length,
+      bullets: game.combat.bullets.length,
+      x: Math.round(game.player.x), y: Math.round(game.player.y),
+      hasSave: game.hasSave,
+    };
+  },
+  press(key) { handleKeyPress(key); },
+  setKeys(k) { Object.assign(keys, k); },
+  teleport(x, y) {
+    game.player.x = x; game.player.y = y;
+    if (game.player.inCar && game.player.car) { game.player.car.x = x; game.player.car.y = y; }
+  },
+  giveCash(n) { game.cash += n; },
+  setWanted(n) { game.wanted = n; },
+  hurt(n) { playerHit(n); },
+  saveNow() { saveGame(); return !!localStorage.getItem(SAVE_KEY); },
+  loadNow() { return loadSave(); },
+};

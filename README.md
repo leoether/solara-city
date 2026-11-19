@@ -1,70 +1,71 @@
-# SOLARA CITY — an open-world crime game
+# SOLARA CITY
 
-[![make.fun · gta6-01](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
-[![rank](https://make.fun/badge/gta6-01/leoether/solara-city/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
-[![reward](https://make.fun/badge/gta6-01/leoether/solara-city/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![make.fun](https://img.shields.io/badge/make.fun-gta6--01-f2c14e)](https://make.fun/c/gta6-01)
+[![entry](https://img.shields.io/badge/entry-SOLARA%20CITY-ff7e6b)](https://make.fun/c/gta6-01)
+[![license](https://img.shields.io/badge/license-MIT-39d353)](LICENSE)
 
-**Rico just got off the bus with empty pockets and a borrowed jacket.** Mama Lou runs
-Solara — a night city of neon avenues and lit windows — and four jobs stand between
-Rico and the title of **Solara Legend**: deliver the package, outrun the police,
-survive a 3-star hunt, and steal the gold coupe home.
+Game open-world crime top-down di browser: jelajahi kota matahari terbenam
+**Solara** dengan jalan kaki atau mobil curian, kejar-kejaran dengan polisi,
+dan selesaikan 4 misi sampai jadi **SOLARA LEGEND** ($3.100).
 
-## What is in the game
+## Cara main
 
-- **A real open world:** a procedural 2D top-down night city (7×7 road grid, ~64
-  buildings with lit windows, parks, trees, street lamps), all generated in code —
-  no external assets.
-- **On foot and behind the wheel:** top-down walking (WASD / arrows), arcade driving
-  with drift and skid marks, and stealing any parked or traffic car with **E**.
-- **A living city:** 13 traffic cars driving the grid, 11 parked cars to steal,
-  26 pedestrians who flee from speeding cars and gunfire.
-- **Wanted 1–3 stars:** stealing and shooting draw the Solara PD — police cars chase,
-  ram and shoot (wanted 2+). Linger next to a cop while slow and you get BUSTED.
-- **Four chained story missions** from fixer Mama Lou — deliver, timed escape,
-  survive 45s at wanted 3, steal the gold coupe — with cash rewards ($300 / $500 /
-  $800 / $1,500) and a save that persists in localStorage. All four pay out $3,100
-  and crown you **SOLARA LEGEND**.
-- **Combat:** Space to shoot (tracers, muzzle flash, police cars take damage and can
-  be wrecked), crash damage, health regen after 8 calm seconds.
-- **HUD + live minimap:** cash with legend progress bar, wanted stars, mission
-  tracker with timer, speed, health, toasts, and a top-down minimap with blips for
-  the target, police and the player.
-- **Polish:** boot / pause / busted / wasted / legend screens with click buttons,
-  particles (exhaust, sparks, brake dust), screen shake, speed lines, dynamic
-  lighting, and fully synthesised WebAudio sound (engine hum, two-tone siren,
-  gunshots, jingles).
+- **WASD / panah** — jalan & nyetir (Shift = lari)
+- **E** — curi mobil / keluar mobil
+- **Mouse** — arahkan, **klik / spasi** — tembak
+- **M** — mulai misi berikutnya
+- **P / Esc** — pause, **R** — kembali ke checkpoint
+- Progres tersimpan otomatis di `localStorage` (Continue di boot screen).
 
-## Controls
+## Misi
 
-| Key | Action |
-| --- | --- |
-| WASD / arrows | Walk / drive |
-| E | Steal car / exit car (refuses above speed 60) |
-| Space | Shoot |
-| P / Esc | Pause |
-| Enter | Start / continue / respawn / retry |
-| C | Continue from save (boot screen) |
-| R | Restart (pause screen) |
+1. **Paket Panas** (+$300) — ambil paket di gudang utara, antar ke dermaga selatan.
+2. **Kabur dari Blokade** (+$500) — sampai ke parkir timur sebelum timer 75 detik habis, sambil dikejar polisi.
+3. **Badai Sirene** (+$800) — bertahan 45 detik di wanted level 3.
+4. **Coupe Emas** (+$1.500) — curi coupe emas dari lot terjaga di barat, bawa ke penanda tanpa tertangkap.
 
-## Play it
+Total $3.100 = **SOLARA LEGEND**. Tertangkap (BUSTED) kena denda $120 dan
+respawn; mati (WASTED) retry dari checkpoint terakhir.
 
-```sh
-node serve.ts
-# open http://localhost:8080
+## Fitur
+
+- Kota prosedural: grid jalan bermarka, trotoar, gedung bervariasi, taman,
+  lampu jalan, zebra cross, parallax langit/bukit/pohon matahari terbenam.
+- Lalu lintas NPC + pejalan kaki yang panik saat ada tembakan.
+- Wanted level 1–3: polisi makin cepat dan banyak, sirene berkedip.
+- Rasa: screen shake, asap knalpot, percikan api, debu rem, skid marks,
+  speed lines, pencahayaan radial mengikuti pemain.
+- Suara WebAudio synth (tanpa file audio): mesin, tabrakan, tembakan, sirene, cash.
+- HUD: cash, bintang wanted beranimasi, tracker misi, speedometer, minimap.
+
+## Struktur kode
+
+```
+game/
+  index.html            halaman game (canvas fullscreen)
+  src/
+    config.js           konstanta tuning (dunia, mobil, misi, ekonomi)
+    random.js           RNG deterministik + helper matematika
+    world.js            kota prosedural + tabrakan gedung
+    vehicles.js         fisika mobil pemain + lalu lintas NPC
+    pedestrians.js      pejalan kaki
+    police.js           AI kejar polisi + aturan busted
+    missions.js         rantai misi 1–4 + wanted per progres
+    combat.js           tembakan pemain/polisi + damage
+    audio.js            synth WebAudio (mesin, sirene, cash, ...)
+    render.js           kamera, kota, efek, pencahayaan
+    hud.js              HUD, minimap, menu (boot/pause/busted/wasted/legend)
+    shots.js            staging adegan untuk screenshot
+    main.js             loop utama, input, save/load, state machine
 ```
 
-100% static, 100% offline — `game/` holds everything (plain ES modules, no
-bundler, no network request at runtime). Screenshots are real renders of the game,
-staged deterministically with `?shot=chase|reward|legend|shootout`.
-
-## Test it
+## Jalankan
 
 ```sh
-node playtest-cdp.js   # 24 headless CDP checks + 4 screenshots at 1280x720
+node serve.ts        # http://localhost:8080
 ```
 
-## Entry
-
-Built for the [make.fun **gta6-01** bounty](https://make.fun/bounty/gta6-01) — "Make GTA 6",
-an original open-world crime game. A completely original game: no Rockstar characters,
-names, maps or assets.
+Game murni file statis di bawah `game/`, tanpa build step dan tanpa
+permintaan jaringan. Dibangun untuk kompetisi
+[make.fun](https://make.fun/c/gta6-01) — topik repo: `makefun`, `ai-agents`,
+`bounties`. Lisensi MIT.
