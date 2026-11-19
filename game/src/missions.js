@@ -1,129 +1,178 @@
-// SOLARA CITY — missions.js
-// Rantai misi 1-4: tiap misi punya fase (idle -> ke pickup -> ke drop ->
-// selesai), timer untuk misi 2, survival untuk misi 3, dan coupe emas
-// untuk misi 4. Mengembalikan event agar main.js bisa memberi reward,
-// suara, dan save.
+// SOLARA CITY — missions 1-4 (fresh build v5). Each mission is a different
+// shape: delivery, timed escape, survival, and a guarded gold-coupe heist.
+// Rewards: 300 / 500 / 800 / 1500 = 3100 total -> SOLARA LEGEND.
 
-import { MISSIONS, ECONOMY } from './config.js';
-import { dist } from './random.js';
+import {
+  MISSION_REWARDS, LEGEND_TOTAL, SAVE_KEY, GOLD_COLOR,
+  dist, clamp, mulberry32,
+} from './state.js';
+import { randomRoadPoint } from './world.js';
+import { spawnGoldCoupe } from './vehicles.js';
 
-export function createMissionState() {
-  return {
-    index: 0,            // misi aktif (0..3); 4 = semua selesai
-    phase: 'idle',       // idle | toPickup | toDrop | survive | done
-    hasPackage: false,
-    timer: 0,            // misi 2: detik tersisa
-    surviveLeft: 0,      // misi 3: detik tersisa
-    goldStolen: false,   // misi 4
-    failed: false,
-    banner: null,        // {text, sub, t} untuk HUD
-    bannerT: 0,
-  };
-}
+const rng = mulberry32(909090);
 
-export function currentMission(ms) {
-  return MISSIONS[ms.index] || null;
-}
+export const MISSION_DEFS = [
+  { name: 'MISI 1 — KURIR PAKET', desc: 'Ambil paket, antar ke titik hijau. +$300' },
+  { name: 'MISI 2 — KABUR!', desc: 'Capai titik hijau sebelum timer habis, polisi mengejar. +$500' },
+  { name: 'MISI 3 — BERTAHAN', desc: 'Bertahan 30 detik di wanted 3. Jangan tertangkap! +$800' },
+  { name: 'MISI 4 — COUPE EMAS', desc: 'Curi coupe emas yang dijaga, bawa ke titik hijau. +$1500' },
+];
 
-export function missionTarget(ms) {
-  const m = currentMission(ms);
-  if (!m) return null;
-  if (ms.phase === 'toPickup') return { ...m.pickup, kind: 'pickup' };
-  if (ms.phase === 'toDrop') return { ...m.drop, kind: 'drop' };
-  if (ms.phase === 'survive') return null;
-  return null;
-}
-
-export function startMission(ms, audio) {
-  const m = currentMission(ms);
-  if (!m) return;
-  ms.failed = false;
-  ms.hasPackage = false;
-  ms.goldStolen = false;
-  if (m.id === 3) {
-    ms.phase = 'survive';
-    ms.surviveLeft = m.surviveSeconds;
-  } else {
-    ms.phase = 'toPickup';
+export function startMission(S, city, idx) {
+  const def = MISSION_DEFS[idx];
+  if (!def) return;
+  const m = { kind: idx, stage: 0, timer: 0, name: def.name, desc: def.desc };
+  if (idx === 0) {
+    const p = randomRoadPoint(rng);
+    const d = randomRoadPoint(rng);
+    S.packagePos = p;
+    S.destPos = d;
+    m.targetX = p.x; m.targetY = p.y;
+    m.pickupDone = false;
+  } else if (idx === 1) {
+    const d = randomRoadPoint(rng);
+    S.destPos = d;
+    m.targetX = d.x; m.targetY = d.y;
+    m.timer = 45;
+    S.wanted = Math.max(S.wanted, 2);
+  } else if (idx === 2) {
+    m.timer = 30;
+    S.surviveT = 0;
+    S.wanted = 3;
+  } else if (idx === 3) {
+    const coupe = spawnGoldCoupe(S, city);
+    const d = randomRoadPoint(rng);
+    S.destPos = d;
+    m.targetX = coupe.x; m.targetY = coupe.y;
+    m.goldX = coupe.x; m.goldY = coupe.y;
+    m.stolen = false;
+    S.wanted = 2;
   }
-  if (m.id === 2) ms.timer = m.timeLimit;
-  setBanner(ms, m.name, m.intro);
-  if (audio) audio.pickup();
+  S.mission = m;
+  S.missionIndex = idx;
+  S.missionMsg = def.name + ' — ' + def.desc;
+  S.banner = def.name;
+  S.bannerT = 2.6;
 }
 
-export function setBanner(ms, text, sub) {
-  ms.banner = { text, sub: sub || '' };
-  ms.bannerT = 4.2;
+export function saveGame(S) {
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify({
+      cash: S.cash, earned: S.earned, missionIndex: S.missionIndex,
+      legend: S.missionIndex >= 4, time: Date.now(),
+    }));
+  } catch (e) { /* storage unavailable in some embeds */ }
 }
 
-// Dipanggil tiap frame saat bermain. player = {x, y, inCar, car}.
-// events: onReward(mission, amount), onFail(reason), onWanted(level).
-export function stepMissions(ms, player, dt, hooks) {
-  const m = currentMission(ms);
-  if (!m) return;
-  if (ms.bannerT > 0) ms.bannerT -= dt;
-  const px = player.x, py = player.y;
+export function loadSave() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) { return null; }
+}
 
-  if (ms.phase === 'toPickup' && m.pickup) {
-    if (dist(px, py, m.pickup.x, m.pickup.y) < 64) {
-      if (m.id === 4) {
-        // Coupe emas: harus naik mobil emasnya.
-        if (player.inCar && player.car && player.car.gold) {
-          ms.goldStolen = true;
-          ms.hasPackage = true;
-          ms.phase = 'toDrop';
-          setBanner(ms, 'COUPE EMAS DICURI!', 'Bawa ke penanda hijau. Jangan tertangkap!');
-          if (hooks.audio) hooks.audio.pickup();
-        } else {
-          setBanner(ms, 'Itu coupe emasnya!', 'Tekan E di samping mobil emas untuk mencurinya.');
-        }
-      } else {
-        ms.hasPackage = true;
-        ms.phase = 'toDrop';
-        setBanner(ms, 'Paket diambil', 'Antar ke penanda hijau.');
-        if (hooks.audio) hooks.audio.pickup();
+export function completeMission(S, city, audio) {
+  const idx = S.missionIndex;
+  const reward = MISSION_REWARDS[idx] || 0;
+  S.cash += reward;
+  S.earned += reward;
+  S.banner = 'MISI SELESAI! +$' + reward;
+  S.bannerT = 3;
+  S.floats.push({
+    x: S.player.x, y: S.player.y - 40, text: '+$' + reward,
+    life: 2, maxLife: 2, color: '#2ecc71', size: 30,
+  });
+  if (audio) audio.cash();
+  S.mission = null;
+  S.packagePos = null;
+  S.destPos = null;
+  S.missionIndex = idx + 1;
+  // Wanted climbs with progress.
+  S.wanted = clamp(S.missionIndex, 0, 3);
+  if (S.missionIndex >= 4) {
+    S.mode = 'legend';
+    S.legendShown = true;
+    if (audio) audio.legend();
+    saveGame(S);
+    return 'legend';
+  }
+  saveGame(S);
+  startMission(S, city, S.missionIndex);
+  return 'next';
+}
+
+export function failMission(S, city, reason) {
+  S.banner = 'MISI GAGAL: ' + reason + ' — coba lagi!';
+  S.bannerT = 3;
+  S.mission = null;
+  S.packagePos = null;
+  S.destPos = null;
+  // Restart the same mission after a short beat.
+  startMission(S, city, S.missionIndex);
+}
+
+export function updateMission(S, dt, city, audio) {
+  const m = S.mission;
+  if (!m || S.mode !== 'playing') return;
+  const p = S.player;
+  if (m.kind === 0) {
+    if (!m.pickupDone) {
+      if (S.packagePos && dist(p.x, p.y, S.packagePos.x, S.packagePos.y) < 46) {
+        m.pickupDone = true;
+        m.targetX = S.destPos.x; m.targetY = S.destPos.y;
+        S.banner = 'PAKET DIDAPAT! ANTAR KE TITIK HIJAU';
+        S.bannerT = 2;
+        if (audio) audio.pickup();
       }
+    } else if (dist(p.x, p.y, S.destPos.x, S.destPos.y) < 52) {
+      completeMission(S, city, audio);
     }
-  } else if (ms.phase === 'toDrop' && m.drop) {
-    if (dist(px, py, m.drop.x, m.drop.y) < 70) {
-      completeMission(ms, hooks);
+  } else if (m.kind === 1) {
+    m.timer -= dt;
+    if (dist(p.x, p.y, S.destPos.x, S.destPos.y) < 52) {
+      completeMission(S, city, audio);
+    } else if (m.timer <= 0) {
+      failMission(S, city, 'WAKTU HABIS');
     }
-  } else if (ms.phase === 'survive') {
-    ms.surviveLeft -= dt;
-    if (ms.surviveLeft <= 0) completeMission(ms, hooks);
-  }
-
-  if (m.id === 2 && (ms.phase === 'toPickup' || ms.phase === 'toDrop')) {
-    ms.timer -= dt;
-    if (ms.timer <= 0) {
-      ms.failed = true;
-      ms.phase = 'idle';
-      if (hooks.onFail) hooks.onFail('Waktu habis — misi 2 gagal.');
+  } else if (m.kind === 2) {
+    m.timer -= dt;
+    S.surviveT += dt;
+    if (m.timer <= 0) {
+      completeMission(S, city, audio);
+    }
+  } else if (m.kind === 3) {
+    if (!m.stolen) {
+      const coupe = S.goldCoupe;
+      if (coupe && p.car === coupe) {
+        m.stolen = true;
+        m.targetX = S.destPos.x; m.targetY = S.destPos.y;
+        S.banner = 'COUPE EMAS DIDAPAT! BAWA KE TITIK HIJAU — JANGAN KETANGKAP';
+        S.bannerT = 2.6;
+        S.wanted = 3;
+        if (audio) audio.pickup();
+      }
+    } else if (dist(p.x, p.y, S.destPos.x, S.destPos.y) < 52) {
+      completeMission(S, city, audio);
     }
   }
 }
 
-function completeMission(ms, hooks) {
-  const m = currentMission(ms);
-  if (!m) return;
-  ms.phase = 'done';
-  ms.index += 1;
-  if (hooks.onReward) hooks.onReward(m, m.reward);
-  if (ms.index >= MISSIONS.length) {
-    setBanner(ms, 'SOLARA LEGEND', 'Kamu menguasai kota. Total $3.100!');
-    if (hooks.onLegend) hooks.onLegend();
-  } else {
-    const next = MISSIONS[ms.index];
-    setBanner(ms, 'MISI SELESAI  +$' + m.reward, 'Misi berikutnya: ' + next.name + ' — tekan M untuk mulai.');
-    ms.phase = 'idle';
+// Busted during the gold heist fails the mission (other missions survive).
+export function onBusted(S, city) {
+  const fine = Math.min(S.cash, 50);
+  S.cash -= fine;
+  if (S.mission && S.mission.kind === 3 && S.mission.stolen) {
+    // Gold coupe is recovered by the guards: reset the heist.
+    if (S.goldCoupe) {
+      S.cars = S.cars.filter(c => c !== S.goldCoupe);
+      S.goldCoupe = null;
+    }
+    S.mission = null;
+    S.packagePos = null; S.destPos = null;
+    startMission(S, city, 3);
   }
-  if (hooks.audio) hooks.audio.cash();
+  S.wanted = 0;
+  S.cops.length = 0;
 }
 
-// Wanted level mengikuti progres: curi mobil = 1, misi 2 = 2, misi 3/4 = 3.
-export function wantedFor(ms, stoleCar) {
-  if (ms.index >= 2) return 3;
-  if (ms.index === 1) return 2;
-  if (stoleCar) return 1;
-  return 0;
-}
+export { LEGEND_TOTAL, GOLD_COLOR };

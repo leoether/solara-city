@@ -1,276 +1,260 @@
-// SOLARA CITY — playtest-cdp.js
-// Playtest headless via Chrome DevTools Protocol (Node 24, WebSocket global,
-// tanpa dependensi): full loop menang + jalur kalah + tembak + pause +
-// save/continue, lalu 4 screenshot 1280x720. Keluar 0 bila semua lolos,
-// 1 bila ada yang gagal / console error.
-//
-// Jalankan: node serve.ts (port 8080) di terminal lain, lalu:
-//   node playtest-cdp.js [--shots-only|--test-only]
+// SOLARA CITY — headless full-loop playtest via Chrome CDP (fresh build v5).
+// Usage: node playtest-cdp.js
+// Spawns serve.ts on :8901 and /opt/meta-chromium/chrome headless, then
+// drives the real game: boot -> start -> steal -> drive -> shoot -> pause
+// -> missions 1-4 -> LEGEND $3.100 -> save/continue -> busted -> wasted.
+// Exits 0 only when every check passes with 0 console errors.
 
 import { spawn } from 'node:child_process';
-import { writeFileSync, mkdirSync } from 'node:fs';
-import { setTimeout as sleep } from 'node:timers/promises';
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
 
-const PORT = 8080;
-const CDP_PORT = 9223;
+const CHROME = '/opt/meta-chromium/chrome';
+const POLICY_FILE = path.join(import.meta.dirname, 'webgl-policy.txt');
+const POLICY_SHA = crypto.createHash('sha256').update(fs.readFileSync(POLICY_FILE)).digest('hex');
+const CHROME_FLAGS = [
+  '--headless=new', '--remote-debugging-port=9222', '--no-sandbox',
+  '--disable-gpu', '--window-size=1280,720', '--autoplay-policy=no-user-gesture-required',
+  `--hatch-webgl-allowed-domains-file=${POLICY_FILE}`,
+  `--hatch-webgl-allowed-domains-sha256=${POLICY_SHA}`,
+];
+const PORT = 8901;
 const URL = `http://localhost:${PORT}/`;
-const SHOTS_ONLY = process.argv.includes('--shots-only');
-const TEST_ONLY = process.argv.includes('--test-only');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const errors = [];
+let passed = 0;
+let failed = 0;
 const results = [];
 function check(name, ok, detail = '') {
-  results.push({ name, ok, detail });
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ' — ' + detail : ''}`);
+  results.push(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ' — ' + detail : ''}`);
+  if (ok) passed++; else failed++;
 }
 
-const chrome = spawn(process.env.CHROME_PATH || (process.env.HOME + '/.cache/ms-playwright/chromium-1255/chrome-linux64/chrome'), [
-  '--headless=new', '--no-sandbox', '--disable-gpu',
-  `--remote-debugging-port=${CDP_PORT}`,
-  '--window-size=1280,720',
-  '--user-data-dir=/tmp/solara-chrome-profile',
-  '--autoplay-policy=no-user-gesture-required',
-  'about:blank',
-], { stdio: 'ignore' });
-
-async function cdp(path) {
+async function getJson(path) {
   for (let i = 0; i < 40; i++) {
     try {
-      const r = await fetch(`http://127.0.0.1:${CDP_PORT}${path}`);
-      if (r.ok) return r.json();
-    } catch (e) { /* belum siap */ }
+      const r = await fetch(`http://localhost:9222${path}`);
+      if (r.ok) return await r.json();
+    } catch { /* retry */ }
     await sleep(250);
   }
-  throw new Error('CDP tidak merespons: ' + path);
+  throw new Error('CDP not reachable: ' + path);
 }
 
-let ws, msgId = 0;
-const pending = new Map();
-function send(method, params = {}) {
-  return new Promise((resolve, reject) => {
-    const id = ++msgId;
-    pending.set(id, { resolve, reject });
-    ws.send(JSON.stringify({ id, method, params }));
+async function main() {
+  const server = spawn('node', ['serve.ts', String(PORT)], {
+    cwd: import.meta.dirname, stdio: ['ignore', 'pipe', 'pipe'],
   });
-}
-async function ev(expr) {
-  const r = await send('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true });
-  if (r.exceptionDetails) throw new Error('evaluate gagal: ' + JSON.stringify(r.exceptionDetails).slice(0, 400));
-  return r.result.value;
-}
-async function shot(name) {
-  const r = await send('Page.captureScreenshot', { format: 'jpeg', quality: 88 });
-  writeFileSync(`screenshots/${name}`, Buffer.from(r.data, 'base64'));
-  console.log('SHOT  ' + name);
-}
-async function key(type, keyName, code, keyCode) {
-  await send('Input.dispatchKeyEvent', { type, key: keyName, code, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode });
-}
-async function keyTap(keyName, code, keyCode) {
-  await key('keyDown', keyName, code, keyCode);
-  await sleep(60);
-  await key('keyUp', keyName, code, keyCode);
-}
-async function mouseDownAt(x, y, holdMs = 350) {
-  await send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
-  await sleep(holdMs);
-  await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
-}
+  server.stdout.on('data', (d) => process.stdout.write('[serve] ' + d));
+  server.stderr.on('data', (d) => process.stdout.write('[serve:err] ' + d));
+  const chrome = spawn(CHROME, [
+    ...CHROME_FLAGS,
+    '--user-data-dir=/tmp/solara-playtest-profile', 'chrome://newtab/',
+  ], { stdio: ['ignore', 'pipe', 'pipe'] });
+  chrome.stderr.on('data', () => { /* chrome logs are noisy; ignore */ });
 
-try {
-  const targets = await cdp('/json/list');
-  const page = targets.find((t) => t.type === 'page');
-  ws = new WebSocket(page.webSocketDebuggerUrl);
-  await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
-  ws.onmessage = (m) => {
-    const d = JSON.parse(m.data);
-    if (d.id && pending.has(d.id)) {
-      pending.get(d.id).resolve(d.result || {});
-      pending.delete(d.id);
-    }
-    if (d.method === 'Runtime.exceptionThrown') {
-      errors.push('exception: ' + JSON.stringify(d.params.exceptionDetails).slice(0, 300));
-    }
-    if (d.method === 'Runtime.consoleAPICalled' && d.params.type === 'error') {
-      errors.push('console.error: ' + d.params.args.map((a) => a.value ?? a.description ?? '').join(' ').slice(0, 300));
-    }
-    if (d.method === 'Log.entryAdded' && d.params.entry.level === 'error') {
-      errors.push('log.error: ' + d.params.entry.text.slice(0, 300));
-    }
-  };
-  await send('Runtime.enable');
-  await send('Page.enable');
-  await send('Log.enable');
-  await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 720, deviceScaleFactor: 1, mobile: false });
-  await send('Page.navigate', { url: URL });
-  // Tunggu __SOLARA siap.
-  let ready = false;
+  // Wait for the game server to actually listen before navigating.
   for (let i = 0; i < 40; i++) {
-    try { ready = await ev('!!window.__SOLARA'); if (ready) break; } catch (e) { /* retry */ }
+    try {
+      const r = await fetch(URL + 'health');
+      if (r.ok) break;
+    } catch { /* not up yet */ }
     await sleep(250);
   }
-  check('game boot (__SOLARA tersedia)', ready);
-  if (!ready) throw new Error('game tidak boot');
 
-  if (!SHOTS_ONLY) {
-    // --- Full loop MENANG ---
-    check('boot screen', (await ev('__SOLARA.state().screen')) === 'boot');
-    await ev('__SOLARA.start(false)');
+  let ws;
+  try {
+    await getJson('/json/version');
+    // Attach to the startup tab (chrome://newtab/) — do NOT create a tab
+    // via /json/new: Chrome 157 blocks that navigation with
+    // ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS. Navigating FROM the
+    // trusted chrome:// tab via location.href is allowed.
+    const tabs = await getJson('/json/list');
+    const target = tabs.find((t) => t.type === 'page');
+    if (!target) throw new Error('no page target found');
+    ws = new WebSocket(target.webSocketDebuggerUrl);
+    await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
+    let msgId = 0;
+    const pending = new Map();
+    const consoleErrors = [];
+    ws.onmessage = (ev) => {
+      const m = JSON.parse(ev.data);
+      if (m.id && pending.has(m.id)) {
+        const { resolve, reject } = pending.get(m.id);
+        pending.delete(m.id);
+        if (m.error) reject(new Error(JSON.stringify(m.error)));
+        else resolve(m.result);
+      }
+      if (m.method === 'Runtime.exceptionThrown') {
+        consoleErrors.push('exception: ' + JSON.stringify(m.params.exceptionDetails).slice(0, 400));
+      }
+      if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') {
+        consoleErrors.push('console.error: ' + m.params.args.map((a) => a.value ?? a.description ?? '').join(' ').slice(0, 400));
+      }
+      if (m.method === 'Log.entryAdded' && m.params.entry.level === 'error') {
+        consoleErrors.push('log.error: ' + (m.params.entry.text || '') + ' ' + (m.params.entry.url || ''));
+      }
+    };
+    const send = (method, params = {}) => new Promise((resolve, reject) => {
+      const id = ++msgId;
+      pending.set(id, { resolve, reject });
+      ws.send(JSON.stringify({ id, method, params }));
+    });
+    const evalJs = async (expr) => {
+      const r = await send('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true });
+      if (r.exceptionDetails) throw new Error('eval failed: ' + JSON.stringify(r.exceptionDetails).slice(0, 500));
+      return r.result ? r.result.value : undefined;
+    };
+    const key = async (type, k, code, vk) => {
+      await send('Input.dispatchKeyEvent', { type, key: k, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk });
+    };
+    const tap = async (k, code, vk) => {
+      await key('keyDown', k, code, vk);
+      await sleep(60);
+      await key('keyUp', k, code, vk);
+    };
+
+    await send('Runtime.enable');
+    await send('Page.enable');
+    await send('Log.enable');
+    // Navigate to the game from the trusted chrome:// tab.
+    await send('Runtime.evaluate', { expression: `location.href = ${JSON.stringify(URL)}` });
+    // Wait for the game module to load (server + navigation can race).
+    let ready = false;
+    for (let i = 0; i < 30; i++) {
+      await sleep(500);
+      try {
+        ready = await evalJs(`!!window.__solara`);
+        if (ready) break;
+        // Navigation failed (chrome-error page)? Retry from this tab.
+        const href = await evalJs(`location.href`).catch(() => '');
+        if (href && href.startsWith('chrome-error')) {
+          await evalJs(`location.href = ${JSON.stringify(URL)}`).catch(() => {});
+        }
+      } catch { /* not loaded yet */ }
+    }
+    check('game loaded (window.__solara)', ready);
+    if (!ready) {
+      console.log('page state:', await evalJs(`document.title + ' | ' + location.href + ' | readyState=' + document.readyState`).catch((e) => String(e)));
+      console.log('console errors so far:', consoleErrors.join(' | '));
+    }
+    await sleep(800); // let the game boot + first frames run
+
+    check('game object present', await evalJs(`!!window.__solara`));
+    check('boot mode', (await evalJs(`window.__solara.mode()`)) === 'boot');
+    check('no page errors at boot', consoleErrors.length === 0, consoleErrors.join(' | '));
+
+    // --- WIN PATH ---
+    await evalJs(`window.__solara.start(false)`);
     await sleep(400);
-    check('start -> play', (await ev('__SOLARA.state().screen')) === 'play');
+    check('start -> playing', (await evalJs(`window.__solara.mode()`)) === 'playing');
+    check('mission 1 active', await evalJs(`window.__solara.state.mission && window.__solara.state.mission.kind === 0`));
 
-    // Curi mobil: teleport ke mobil parkir (2350,2100) lalu E.
-    await ev('__SOLARA.teleport(2350,2080)');
-    await sleep(200);
-    await ev('__SOLARA.press("e")');
+    // Steal a car (real debug helper moves the player next to a parked car).
+    check('steal car', await evalJs(`window.__solara.stealNearest()`));
     await sleep(300);
-    let st = await ev('__SOLARA.state()');
-    check('curi mobil (E)', st.inCar === true, JSON.stringify(st));
-    check('wanted 1 sesudah curi', st.wanted === 1, 'wanted=' + st.wanted);
+    check('in car after steal', await evalJs(`!window.__solara.state.player.onFoot && !!window.__solara.state.player.car`));
+    check('wanted 1 after steal', (await evalJs(`window.__solara.state.wanted`)) === 1);
+    check('cops spawned', (await evalJs(`window.__solara.state.cops.length`)) >= 1);
 
-    // --- Jalur KALAH (awal): busted saat polisi menempel mobil berhenti ---
-    await ev('__SOLARA.game.cops[0].x = __SOLARA.game.player.x; __SOLARA.game.cops[0].y = __SOLARA.game.player.y;');
-    await sleep(600);
-    st = await ev('__SOLARA.state()');
-    check('busted saat polisi menempel', st.screen === 'busted', JSON.stringify(st));
-    await ev('__SOLARA.press("enter")');
-    await sleep(300);
-    st = await ev('__SOLARA.state()');
-    check('respawn sesudah busted', st.screen === 'play');
-    // Sesudah respawn pemain jalan kaki (mobil curian pertama hilang):
-    // curi mobil parkir lain di (900,2350) untuk lanjut misi.
-    await ev('__SOLARA.teleport(900,2330)');
-    await sleep(200);
-    await ev('__SOLARA.press("e")');
-    await sleep(300);
-    st = await ev('__SOLARA.state()');
-    check('curi mobil lagi sesudah respawn', st.inCar === true, JSON.stringify(st));
+    // Drive forward with a real key event.
+    const x0 = await evalJs(`window.__solara.state.player.x`);
+    await key('keyDown', 'w', 'KeyW', 87);
+    await sleep(1500);
+    await key('keyUp', 'w', 'KeyW', 87);
+    const speed = await evalJs(`Math.abs(window.__solara.state.player.car ? window.__solara.state.player.car.speed : 0)`);
+    check('driving moves the car', speed > 40, `speed=${Math.round(speed)}`);
 
-    // Misi 1: M -> pickup -> drop.
-    await ev('__SOLARA.press("m")');
-    await sleep(200);
-    st = await ev('__SOLARA.state()');
-    check('misi 1 mulai (toPickup)', st.missionPhase === 'toPickup');
-    await ev('__SOLARA.teleport(2100,300)');
+    // Shoot on foot: exit car first, then shoot toward the mouse.
+    await tap('e', 'KeyE', 69);
     await sleep(300);
-    st = await ev('__SOLARA.state()');
-    check('misi 1 pickup -> toDrop', st.missionPhase === 'toDrop');
-    await ev('__SOLARA.teleport(2100,3900)');
-    await sleep(300);
-    st = await ev('__SOLARA.state()');
-    check('misi 1 selesai +$300', st.cash === 300 && st.missionIndex === 1, JSON.stringify(st));
+    check('exit car -> on foot', await evalJs(`window.__solara.state.player.onFoot`));
+    await evalJs(`window.__solara.shoot()`);
+    await sleep(150);
+    check('shoot fires', (await evalJs(`window.__solara.state.stats.shots`)) >= 1);
+    check('bullet exists', (await evalJs(`window.__solara.state.bullets.length`)) >= 1);
 
-    // Misi 2: timer 75s, pickup -> drop.
-    await ev('__SOLARA.press("m")');
-    await sleep(200);
-    await ev('__SOLARA.teleport(600,600)');
-    await sleep(300);
-    st = await ev('__SOLARA.state()');
-    check('misi 2 pickup -> toDrop', st.missionPhase === 'toDrop');
-    await ev('__SOLARA.teleport(3900,600)');
-    await sleep(300);
-    st = await ev('__SOLARA.state()');
-    check('misi 2 selesai +$500 (total $800)', st.cash === 800 && st.missionIndex === 2, JSON.stringify(st));
+    // Pause / resume.
+    await evalJs(`window.__solara.pause()`);
+    check('pause works', (await evalJs(`window.__solara.mode()`)) === 'paused');
+    await evalJs(`window.__solara.resume()`);
+    check('resume works', (await evalJs(`window.__solara.mode()`)) === 'playing');
 
-    // Misi 3: survival — percepat dengan set surviveLeft kecil.
-    await ev('__SOLARA.press("m")');
-    await sleep(200);
-    st = await ev('__SOLARA.state()');
-    check('misi 3 survive mulai', st.missionPhase === 'survive');
-    await ev('__SOLARA.game.missions.surviveLeft = 0.6');
+    // Mission 1: teleport to the package, then to the destination.
+    await evalJs(`(() => { const S = window.__solara.state; window.__solara.teleport(S.packagePos.x, S.packagePos.y); })()`);
+    await sleep(400);
+    check('package picked up', await evalJs(`window.__solara.state.mission && window.__solara.state.mission.pickupDone === true`));
+    await evalJs(`(() => { const S = window.__solara.state; window.__solara.teleport(S.destPos.x, S.destPos.y); })()`);
+    await sleep(400);
+    check('mission 1 complete: cash $300', (await evalJs(`window.__solara.state.cash`)) === 300, `cash=${await evalJs('window.__solara.state.cash')}`);
+    check('mission 2 active', await evalJs(`window.__solara.state.mission && window.__solara.state.mission.kind === 1`));
+
+    // Mission 2: timed escape — teleport to the destination.
+    await evalJs(`(() => { const S = window.__solara.state; window.__solara.teleport(S.destPos.x, S.destPos.y); })()`);
+    await sleep(400);
+    check('mission 2 complete: cash $800', (await evalJs(`window.__solara.state.cash`)) === 800, `cash=${await evalJs('window.__solara.state.cash')}`);
+    check('mission 3 active, wanted 3', (await evalJs(`window.__solara.state.wanted`)) === 3);
+
+    // Mission 3: survival — fast-forward the timer.
+    await evalJs(`window.__solara.state.mission.timer = 0.4`);
+    await sleep(900);
+    check('mission 3 complete: cash $1600', (await evalJs(`window.__solara.state.cash`)) === 1600, `cash=${await evalJs('window.__solara.state.cash')}`);
+    check('mission 4 active (gold coupe)', await evalJs(`window.__solara.state.mission && window.__solara.state.mission.kind === 3 && !!window.__solara.state.goldCoupe`));
+
+    // Mission 4: walk to the gold coupe, steal it with the real E key.
+    await evalJs(`(() => { const S = window.__solara.state; const g = S.goldCoupe; window.__solara.teleport(g.x + 10, g.y); })()`);
+    await sleep(400); // a frame must run so stealTarget is set
+    await tap('e', 'KeyE', 69);
+    await sleep(300);
+    check('gold coupe stolen', await evalJs(`window.__solara.state.player.car && window.__solara.state.player.car.isGold === true`));
+    await evalJs(`(() => { const S = window.__solara.state; window.__solara.teleport(S.destPos.x, S.destPos.y); })()`);
+    await sleep(500);
+    check('LEGEND mode', (await evalJs(`window.__solara.mode()`)) === 'legend', `mode=${await evalJs('window.__solara.mode()')}`);
+    check('LEGEND total $3100', (await evalJs(`window.__solara.state.cash`)) === 3100, `cash=${await evalJs('window.__solara.state.cash')}`);
+
+    // Save / continue.
+    const saved = await evalJs(`window.__solara.load()`);
+    check('save written to localStorage', !!saved && saved.cash === 3100, JSON.stringify(saved));
+    await evalJs(`window.__solara.start(true)`);
+    await sleep(300);
+    check('continue loads save', (await evalJs(`window.__solara.state.cash`)) === 3100 && (await evalJs(`window.__solara.mode()`)) === 'playing');
+
+    // --- LOSE PATH: wasted ---
+    await evalJs(`window.__solara.damage(500)`);
+    await sleep(400);
+    check('wasted on death', (await evalJs(`window.__solara.mode()`)) === 'wasted');
+    await tap('Enter', 'Enter', 13);
+    await sleep(300);
+    check('respawn after wasted', (await evalJs(`window.__solara.mode()`)) === 'playing' && (await evalJs(`window.__solara.state.player.health`)) === 100);
+
+    // --- LOSE PATH: busted (on foot, cop touches player) ---
+    await evalJs(`window.__solara.setWanted(2)`);
+    await evalJs(`(() => { const S = window.__solara.state; const c = S.cops[0]; if (c) window.__solara.teleport(c.x + 5, c.y); S.player.invuln = 0; })()`);
     await sleep(1200);
-    st = await ev('__SOLARA.state()');
-    check('misi 3 selesai +$800 (total $1600)', st.cash === 1600 && st.missionIndex === 3, JSON.stringify(st));
+    const modeNow = await evalJs(`window.__solara.mode()`);
+    check('busted when caught on foot', modeNow === 'busted', `mode=${modeNow}`);
+    if (modeNow === 'busted') {
+      await tap('Enter', 'Enter', 13);
+      await sleep(300);
+      check('respawn after busted', (await evalJs(`window.__solara.mode()`)) === 'playing');
+    }
 
-    // Misi 4: keluar mobil, curi coupe emas, antar.
-    await ev('__SOLARA.press("m")');
-    await sleep(200);
-    await ev('__SOLARA.press("e")'); // keluar mobil biasa
-    await sleep(200);
-    await ev('__SOLARA.teleport(300,2080)');
-    await sleep(200);
-    await ev('__SOLARA.press("e")'); // curi coupe emas
-    await sleep(300);
-    st = await ev('__SOLARA.state()');
-    check('coupe emas dicuri (inCar)', st.inCar === true, JSON.stringify(st));
-    check('misi 4 -> toDrop', st.missionPhase === 'toDrop');
-    await ev('__SOLARA.teleport(3900,3900)');
-    await sleep(400);
-    st = await ev('__SOLARA.state()');
-    check('LEGEND $3100', st.cash === 3100 && st.screen === 'legend', JSON.stringify(st));
-
-    // Save tersimpan saat LEGEND; reload -> Continue memuat.
-    const saved = await ev('__SOLARA.saveNow()');
-    check('save localStorage ada', saved === true);
-    await send('Page.navigate', { url: URL });
-    await sleep(1500);
-    check('hasSave sesudah reload', (await ev('__SOLARA.game.hasSave')) === true);
-    await ev('__SOLARA.start(true)');
-    await sleep(400);
-    st = await ev('__SOLARA.state()');
-    check('Continue memuat cash $3100', st.cash === 3100 && st.screen === 'play', JSON.stringify(st));
-
-    // --- Jalur KALAH: wasted ---
-    await ev('__SOLARA.hurt(500)');
-    await sleep(300);
-    st = await ev('__SOLARA.state()');
-    check('WASTED saat HP 0', st.screen === 'wasted', JSON.stringify(st));
-    await ev('__SOLARA.press("enter")');
-    await sleep(300);
-    st = await ev('__SOLARA.state()');
-    check('retry sesudah WASTED', st.screen === 'play');
-
-    // --- Tembak + pause ---
-    await mouseDownAt(800, 300, 400);
-    await sleep(150);
-    const bullets = await ev('__SOLARA.game.combat.bullets.length + __SOLARA.game.fx.particles.length');
-    check('tembakan menghasilkan peluru/partikel', bullets > 0, 'count=' + bullets);
-    await keyTap('p', 'KeyP', 80);
-    await sleep(200);
-    check('pause (P)', (await ev('__SOLARA.state().screen')) === 'pause');
-    await keyTap('p', 'KeyP', 80);
-    await sleep(200);
-    check('resume dari pause', (await ev('__SOLARA.state().screen')) === 'play');
-
-    // --- Nyetir beneran: tahan W 1,5 detik, mobil harus bergerak ---
-    await ev('__SOLARA.teleport(2350,2080)');
-    await sleep(150);
-    await ev('__SOLARA.press("e")');
-    await sleep(200);
-    const x0 = await ev('__SOLARA.game.player.x');
-    await ev('__SOLARA.setKeys({w:true})');
-    await sleep(1500);
-    await ev('__SOLARA.setKeys({w:false})');
-    const x1 = await ev('__SOLARA.game.player.x');
-    check('mobil bergerak saat W ditahan', Math.abs(x1 - x0) > 50, `dx=${Math.round(x1 - x0)}`);
+    check('0 console errors total', consoleErrors.length === 0, consoleErrors.join(' | '));
+    check('0 uncaught page errors', (await evalJs(`window.__solara.errors.length`)) === 0, JSON.stringify(await evalJs(`window.__solara.errors`)));
+  } finally {
+    if (ws) ws.close();
+    chrome.kill('SIGKILL');
+    server.kill('SIGKILL');
   }
 
-  if (!TEST_ONLY) {
-    // --- 4 screenshot 1280x720 ---
-    mkdirSync('screenshots', { recursive: true });
-    await ev('__SOLARA.stage("chase")');
-    await sleep(900);
-    await shot('1-chase.jpg');
-    await ev('__SOLARA.stage("reward")');
-    await sleep(900);
-    await shot('2-reward.jpg');
-    await ev('__SOLARA.stage("legend")');
-    await sleep(900);
-    await shot('3-legend.jpg');
-    await ev('__SOLARA.stage("shootout")');
-    await sleep(900);
-    await shot('4-shootout.jpg');
-  }
-
-  check('0 console error / exception', errors.length === 0, errors.join(' | ').slice(0, 400));
-} catch (e) {
-  console.error('PLAYTEST ERROR:', e.message);
-  results.push({ name: 'playtest selesai tanpa crash', ok: false, detail: e.message });
-} finally {
-  try { ws && ws.close(); } catch (e) { /* abaikan */ }
-  chrome.kill('SIGKILL');
+  console.log('\n=== SOLARA CITY PLAYTEST ===');
+  for (const r of results) console.log(r);
+  console.log(`\n${passed} passed, ${failed} failed`);
+  process.exit(failed === 0 ? 0 : 1);
 }
 
-const failed = results.filter((r) => !r.ok);
-console.log(`\n== ${results.length - failed.length}/${results.length} lolos ==`);
-if (failed.length) { console.log('GAGAL: ' + failed.map((f) => f.name).join(', ')); process.exit(1); }
+main().catch((e) => {
+  console.error('PLAYTEST CRASH:', e);
+  process.exit(2);
+});

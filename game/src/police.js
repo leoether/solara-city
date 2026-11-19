@@ -1,68 +1,86 @@
-// SOLARA CITY — police.js
-// Polisi: spawn di tepi layar sesuai wanted level, mengejar pemain dengan
-// steering pursuit, menabrak untuk menghentikan. Busted bila polisi menempel
-// pemain (jalan kaki) atau mobil pemain berhenti total di dekatnya.
+// SOLARA CITY — police AI (fresh build v5). Cops spawn on roads away from
+// the player, chase with steering, ram the player car, and bust the player
+// on foot. Count + speed scale with wanted level.
 
-import { WANTED, CAR } from './config.js';
-import { clamp, angleDiff, dist } from './random.js';
-import { makeCar, stepPlayerCar } from './vehicles.js';
-import { nearestRoadPoint } from './world.js';
+import { WORLD_W, WORLD_H, COP_COLOR, makeCar, clamp, dist, angleLerp, mulberry32 } from './state.js';
+import { randomRoadPoint } from './world.js';
+import { addSparks } from './vehicles.js';
 
-export function makeCop(x, y, angle) {
-  const car = makeCar(x, y, angle, '#1c2733', { isCop: true });
-  car.lightPhase = Math.random() * Math.PI * 2;
-  return car;
+const rng = mulberry32(424242);
+
+export function desiredCopCount(wanted) {
+  return [0, 2, 4, 6][clamp(wanted, 0, 3)] || 0;
 }
 
-// Jumlah polisi yang harus aktif untuk level wanted tertentu.
-export function desiredCops(level) {
-  return (WANTED[level] || WANTED[0]).cops;
+export function copTopSpeed(wanted) {
+  return [0, 330, 380, 440][clamp(wanted, 0, 3)] || 0;
 }
 
-// Spawn polisi di jalan terdekat, agak jauh dari pemain (di luar layar).
-export function spawnCopNear(city, px, py, viewR) {
-  const ang = Math.random() * Math.PI * 2;
-  const d = viewR + 160 + Math.random() * 260;
-  const p = nearestRoadPoint(city, px + Math.cos(ang) * d, py + Math.sin(ang) * d);
-  const car = makeCop(p.x, p.y, p.axis === 'h' ? 0 : Math.PI / 2);
-  car.speed = 200;
-  return car;
-}
-
-// Kejar pemain: steering menuju pemain, kecepatan naik per level.
-export function stepCop(cop, px, py, level, dt, city, fx) {
-  const cfg = WANTED[level] || WANTED[0];
-  const target = Math.atan2(py - cop.y, px - cop.x);
-  const diff = angleDiff(cop.angle, target);
-  const maxTurn = 2.6 * dt * cfg.aggression;
-  cop.angle += clamp(diff, -maxTurn, maxTurn);
-  const desired = cfg.copSpeed * (0.85 + 0.15 * Math.sin(cop.lightPhase));
-  const dd = dist(cop.x, cop.y, px, py);
-  const want = dd > 90 ? desired : desired * 0.45;
-  cop.speed += (want - cop.speed) * Math.min(1, 1.6 * dt);
-  cop.vx = Math.cos(cop.angle) * cop.speed;
-  cop.vy = Math.sin(cop.angle) * cop.speed;
-  cop.x += cop.vx * dt;
-  cop.y += cop.vy * dt;
-  cop.lightPhase += dt * 7;
-  // Polisi menabrak gedung: pantulkan pelan.
-  const hit = city.buildings.some((b) => cop.x > b.x - 14 && cop.x < b.x + b.w + 14 && cop.y > b.y - 14 && cop.y < b.y + b.h + 14);
-  if (hit) {
-    cop.angle += Math.PI / 2;
-    cop.speed *= 0.5;
-    cop.x -= cop.vx * dt * 2;
-    cop.y -= cop.vy * dt * 2;
+export function spawnCops(S, city) {
+  const want = desiredCopCount(S.wanted);
+  while (S.cops.length < want) {
+    const p = randomRoadPoint(rng);
+    if (dist(p.x, p.y, S.player.x, S.player.y) < 500) continue;
+    const c = makeCar(p.x, p.y, Math.atan2(S.player.y - p.y, S.player.x - p.x), COP_COLOR, { isCop: true });
+    c.speed = 120;
+    c.siren = Math.random() * 6;
+    S.cops.push(c);
   }
-  return dd;
+  while (S.cops.length > want) S.cops.pop();
 }
 
-// Busted? Polisi menempel pemain jalan kaki, atau mobil pemain nyaris
-// berhenti sementara polisi menempel.
-export function checkBusted(cops, player) {
-  for (const cop of cops) {
-    const d = dist(cop.x, cop.y, player.x, player.y);
-    if (!player.inCar && d < 46) return cop;
-    if (player.inCar && d < 58 && Math.abs(player.car.speed) < 45) return cop;
+export function updateCops(S, dt, city, audio) {
+  const p = S.player;
+  const top = copTopSpeed(S.wanted);
+  for (const c of S.cops) {
+    c.siren += dt;
+    // Steer toward the player with a little wobble so chases feel alive.
+    const wantAngle = Math.atan2(p.y - c.y, p.x - c.x) + Math.sin(S.time * 1.7 + c.siren) * 0.12;
+    c.angle = angleLerp(c.angle, wantAngle, Math.min(1, dt * 2.4));
+    const d = dist(c.x, c.y, p.x, p.y);
+    const target = d > 260 ? top : top * 0.85;
+    c.speed += (target - c.speed) * Math.min(1, dt * 1.2);
+    c.x += Math.cos(c.angle) * c.speed * dt;
+    c.y += Math.sin(c.angle) * c.speed * dt;
+    c.x = clamp(c.x, 30, WORLD_W - 30);
+    c.y = clamp(c.y, 30, WORLD_H - 30);
+    // Ram the player car.
+    if (p.car && d < 46) {
+      const push = (46 - d);
+      const ux = (p.car.x - c.x) / Math.max(d, 0.01);
+      const uy = (p.car.y - c.y) / Math.max(d, 0.01);
+      p.car.x += ux * push * 0.5;
+      p.car.y += uy * push * 0.5;
+      p.car.speed *= 0.92;
+      p.car.health -= 6 * dt * 10;
+      c.speed *= 0.8;
+      if (Math.random() < dt * 6) {
+        addSparks(S, p.car.x, p.car.y, 5);
+        S.shake = Math.max(S.shake, 5);
+        if (audio) audio.crash(false);
+      }
+      // Car wrecked -> player is thrown out on foot, health hit.
+      if (p.car.health <= 0) {
+        addSparks(S, p.car.x, p.car.y, 26);
+        S.shake = Math.max(S.shake, 16);
+        if (audio) audio.crash(true);
+        p.health -= 25;
+        const wreck = p.car;
+        wreck.health = 0;
+        p.car = null;
+        p.onFoot = true;
+        p.x = wreck.x + 40; p.y = wreck.y + 40;
+        p.invuln = 2;
+        S.banner = 'MOBIL HANCUR! LARI!';
+        S.bannerT = 2.2;
+      }
+    }
+    // Cop catches the player on foot -> BUSTED.
+    if (p.onFoot && p.invuln <= 0 && d < 34 && S.wanted > 0 && S.mode === 'playing') {
+      S.mode = 'busted';
+      S.stats.busts++;
+      if (audio) { audio.busted(); audio.siren(false); }
+    }
   }
-  return null;
+  if (audio) audio.siren(S.wanted > 0 && S.mode === 'playing');
 }
