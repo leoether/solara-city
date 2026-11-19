@@ -1,93 +1,143 @@
-// SOLARA CITY — shared game state (fresh build v5, written in this session).
-// A sun-soaked open-world crime game: steal cars, dodge the law, run four
-// missions and become a SOLARA LEGEND. All tuning lives here so every module
-// reads the same numbers.
+// SOLARA CITY — state.js
+// Single source of truth for game state: cash, wanted level, missions,
+// player/vehicle status, save/load. No rendering, no input here.
 
-export const WORLD_W = 3400;
-export const WORLD_H = 3400;
-export const ROAD = 150; // road width in world units
-export const BLOCK = 340; // city block pitch (road + block)
-export const VIEW_W = 1280;
-export const VIEW_H = 720;
-
+export const SAVE_KEY = 'solara-city-save-v6';
+export const LEGEND_CASH = 3100;
 export const MISSION_REWARDS = [300, 500, 800, 1500];
-export const LEGEND_TOTAL = 3100;
-export const SAVE_KEY = 'solara-city-save-v5';
-
-export const CAR_COLORS = [
-  '#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6',
-  '#1abc9c', '#e67e22', '#ecf0f1', '#34495e', '#fd79a8',
+export const MISSION_NAMES = [
+  'Paket Kilat',
+  'Kabur dari Kejaran',
+  'Bertahan di Wanted 3',
+  'Coupe Emas',
 ];
-export const COP_COLOR = '#2c3e50';
-export const GOLD_COLOR = '#ffd700';
-
-// Small deterministic RNG so the city layout is stable between loads.
-export function mulberry32(seed) {
-  let a = seed >>> 0;
-  return function () {
-    a |= 0; a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-export function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
-export function lerp(a, b, t) { return a + (b - a) * t; }
-export function dist(ax, ay, bx, by) { return Math.hypot(bx - ax, by - ay); }
-export function angleLerp(a, b, t) {
-  let d = b - a;
-  while (d > Math.PI) d -= Math.PI * 2;
-  while (d < -Math.PI) d += Math.PI * 2;
-  return a + d * t;
-}
-
-export function makeCar(x, y, angle, color, opts = {}) {
-  return {
-    x, y, angle, speed: 0, color,
-    isPlayer: !!opts.isPlayer, isCop: !!opts.isCop, isGold: !!opts.isGold,
-    isTraffic: !!opts.isTraffic, parked: !!opts.parked,
-    w: 46, h: 22, health: opts.health ?? 100,
-    targetAngle: angle, siren: 0, honk: 0, brakeLight: false,
-  };
-}
-
-export function makePed(x, y, rng) {
-  const palette = ['#ff6b6b', '#48dbfb', '#feca57', '#1dd1a1', '#c8d64f', '#ff9ff3'];
-  return {
-    x, y, angle: rng() * Math.PI * 2, speed: 22 + rng() * 26,
-    color: palette[Math.floor(rng() * palette.length)],
-    walkPhase: rng() * 6.28, panic: 0,
-  };
-}
+export const WORLD_W = 3600;
+export const WORLD_H = 2600;
 
 export function createState() {
   return {
     mode: 'boot', // boot | playing | paused | busted | wasted | legend
     time: 0,
     cash: 0,
-    earned: 0,
+    wanted: 0,
+    health: 100,
+    legend: false,
     missionIndex: 0, // 0..3 active, 4 = all done
-    mission: null, // { kind, stage, timer, targetX, targetY, ... }
-    missionMsg: '',
-    banner: '', bannerT: 0,
+    mission: null, // active mission runtime object (see missions.js)
+    banner: null, // { title, sub, until }
+    toast: null, // { text, until }
+    shake: 0,
+    stats: { steals: 0, shots: 0, hits: 0, crashes: 0, missionsDone: 0 },
     player: {
-      x: WORLD_W / 2, y: WORLD_H / 2, angle: -Math.PI / 2,
-      speed: 0, onFoot: true, health: 100, car: null,
-      shootCd: 0, muzzle: 0, invuln: 0,
+      x: 1648, y: 1300, angle: -Math.PI / 2, speed: 0,
+      onFoot: true, inCar: false, carId: null,
+      walkSpeed: 230, radius: 14,
     },
-    cars: [], traffic: [], cops: [], peds: [],
-    bullets: [], particles: [], skids: [], floats: [],
-    wanted: 0, heat: 0,
-    shake: 0, shakeX: 0, shakeY: 0,
-    cam: { x: WORLD_W / 2, y: WORLD_H / 2 },
-    keys: {},
-    stats: { shots: 0, hits: 0, busts: 0, deaths: 0, steals: 0 },
-    goldCoupe: null,
-    packagePos: null, destPos: null,
-    surviveT: 0,
-    flash: 0, flashColor: '255,255,255',
-    legendShown: false,
+    car: null, // active driven car { id, x, y, angle, speed, color, kind, gold }
+    cars: [], // parked + traffic cars
+    cops: [],
+    peds: [],
+    bullets: [],
+    enemyBullets: [],
+    particles: [],
+    skids: [],
+    pickups: [],
+    goldCoupe: null, // { x, y, stolen, delivered }
+    bustedTimer: 0,
+    wastedTimer: 0,
+    pausedFrom: null,
     muted: false,
+    startedAt: 0,
   };
+}
+
+export function missionReward(index) {
+  return MISSION_REWARDS[index] || 0;
+}
+
+export function totalCashForLegend() {
+  return LEGEND_CASH;
+}
+
+export function saveGame(state) {
+  try {
+    const data = {
+      v: 6,
+      cash: state.cash,
+      missionIndex: state.missionIndex,
+      legend: state.legend,
+      health: state.health,
+      wanted: state.wanted,
+      savedAt: Date.now(),
+    };
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
+export function loadGame() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (!data || data.v !== 6) return null;
+    return data;
+  } catch (err) {
+    return null;
+  }
+}
+
+export function hasSave() {
+  return loadGame() !== null;
+}
+
+export function clearSave() {
+  try {
+    localStorage.removeItem(SAVE_KEY);
+  } catch (err) {
+    /* storage unavailable */
+  }
+}
+
+export function applySave(state, data) {
+  state.cash = data.cash || 0;
+  state.missionIndex = data.missionIndex || 0;
+  state.legend = !!data.legend;
+  state.health = data.health || 100;
+  state.wanted = data.wanted || 0;
+}
+
+export function showBanner(state, title, sub, seconds = 3) {
+  state.banner = { title, sub: sub || '', until: state.time + seconds };
+}
+
+export function showToast(state, text, seconds = 2.5) {
+  state.toast = { text, until: state.time + seconds };
+}
+
+export function addCash(state, amount, reason) {
+  state.cash += amount;
+  showBanner(
+    state,
+    `+$${amount.toLocaleString('en-US')}`,
+    reason || 'Misi selesai',
+    3.2,
+  );
+  if (state.cash >= LEGEND_CASH && !state.legend) {
+    state.legend = true;
+    state.mode = 'legend';
+    saveGame(state);
+  }
+}
+
+export function addShake(state, amount) {
+  state.shake = Math.min(26, state.shake + amount);
+}
+
+export function setWanted(state, level) {
+  state.wanted = Math.max(0, Math.min(3, level));
+  // A wanted change invalidates the previous steal/heat toast.
+  state.toast = null;
 }

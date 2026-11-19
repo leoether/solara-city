@@ -1,67 +1,77 @@
 # SOLARA CITY
 
-[![make.fun](https://img.shields.io/badge/make.fun-bounty-ff6b35)](https://make.fun)
-[![AI Agents](https://img.shields.io/badge/ai--agents-gta6--01-7b61ff)](https://make.fun)
-[![Bounties](https://img.shields.io/badge/bounties-gta6--01-2ecc71)](https://make.fun)
+[![make.fun](https://img.shields.io/badge/make.fun-GTA%206%20bounty-orange)](https://make.fun/c/gta6-01)
+[![entry](https://img.shields.io/badge/entry-SOLARA%20CITY-gold)](https://make.fun/c/gta6-01)
+[![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
-A sun-soaked GTA-style top-down open-world game, built fresh for the
-**gta6-01** make.fun bounty (round 4, v5 rebuild). Steal cars, outrun the
-police, run four missions, and become a **SOLARA LEGEND**.
+Game kota terbuka 2D bergaya GTA — orisinal, tanpa aset dari game komersial
+mana pun. Dibangun untuk kompetisi **GTA 6** di make.fun.
 
-## How to play
+**Topik repo:** `makefun` `ai-agents` `bounties`
 
-```bash
-node main.ts        # serves the game at http://localhost:8080
-# or
-node serve.ts 8901  # dev server
+## Cara main
+
+```sh
+node serve.ts
+# buka http://localhost:8080
 ```
 
-Open the page in a browser and press **Start** (or Enter).
+Tidak ada build step: `game/` adalah file statis, `game/index.html` langsung
+dimainkan di desktop Chrome. Semua suara disintesis dengan WebAudio —
+tanpa file audio, tanpa request jaringan.
 
-| Key | Action |
+## Kontrol
+
+| Tombol | Aksi |
 | --- | --- |
-| WASD / Arrow keys | Walk & drive |
-| E | Steal a car / exit a car |
-| Mouse click / Space | Shoot |
-| P / Esc | Pause |
-| M | Mute |
-| Enter | Continue / respawn |
+| WASD / panah | Jalan kaki / nyetir |
+| E | Curi mobil (atau keluar dari mobil) |
+| Spasi / klik | Tembak |
+| M | Mulai misi berikutnya |
+| P / Esc | Jeda |
+| R | Klakson |
+| Enter | Mulai / respawn / retry |
 
-## Missions
+## Misi (total $3.100 = SOLARA LEGEND)
 
-1. **Kurir Paket (+$300)** — pick up the package, deliver it to the green marker.
-2. **Kabur! (+$500)** — reach the green marker before the 45s timer runs out while police chase you.
-3. **Bertahan (+$800)** — survive 30 seconds at wanted level 3.
-4. **Coupe Emas (+$1500)** — steal the guarded gold coupe and bring it to the garage.
+1. **Paket Kilat** (+$300) — ambil paket, antar ke tujuan.
+2. **Kabur dari Kejaran** (+$500) — sampai ke tempat aman sebelum timer
+   habis sambil dikejar polisi wanted 1–2.
+3. **Bertahan di Wanted 3** (+$800) — bertahan 45 detik, polisi agresif.
+4. **Coupe Emas** (+$1.500) — curi coupe emas dari lokasi terjaga, antar
+   ke penanda ungu tanpa tertangkap (busted = misi gagal, coba lagi).
 
-Finish all four (total **$3.100**) to become a **SOLARA LEGEND**. Progress
-auto-saves to `localStorage`; **Continue** on the boot screen resumes it.
+Wanted naik 1 → 2 → 3 mengikuti progres misi; polisi makin cepat dan
+makin banyak. Busted = respawn (cash dipotong 10%), WASTED = retry dari
+checkpoint. Progres tersimpan otomatis ke localStorage tiap misi selesai —
+tombol **Lanjutkan** di boot screen memuatnya.
 
-Getting **busted** costs $50 and respawns you; dying shows **WASTED** and
-retries from your last checkpoint.
+## Fitur
 
-## Game feel
+- Kota prosedural: jalan bermarka, trotoar, gedung bervariasi, lampu jalan,
+  taman dan pohon palem, lalu lintas dan pejalan kaki.
+- Game feel: screen shake, asap knalpot, percikan api tabrakan, debu rem,
+  skid marks, speed lines, wanted stars beranimasi.
+- Visual: dynamic lighting mengikuti mobil, parallax langit/bukit/palem,
+  minimap (pemain, polisi, target misi), HUD cash/wanted/kecepatan.
+- Suara synth WebAudio: mesin, tabrakan, tembakan, sirene, bunyi cash.
 
-- Dynamic screen shake on crashes, hard turns and hits
-- Exhaust smoke, crash sparks, brake dust, skid marks
-- Speed lines at high speed, hit flash, animated wanted stars
-- Synthesized WebAudio: engine, crashes, gunshots, police sirens, cash jingles
-- Dynamic lighting around the player, parallax sky / hills / tree line
-- Minimap with player, police and mission targets
+## Struktur kode
 
-## Tech
+- `main.ts` — entrypoint: menyalin `game/` + `screenshots/` ke output dan
+  menulis `dossier.json` (make.fun).
+- `serve.ts` — dev server statis untuk main lokal.
+- `game/index.html` — halaman game.
+- `game/src/main.js` — orkestrator: `init()`, `loop(dt)`,
+  `handleInput()`, `updateWanted(level)`.
+- `game/src/state.js` — state + save/load localStorage.
+- `game/src/world.js` — kota prosedural + parallax.
+- `game/src/vehicles.js` — fisika mobil + lalu lintas.
+- `game/src/police.js` — AI polisi + sistem wanted.
+- `game/src/missions.js` — logika misi 1–4.
+- `game/src/render.js` — rendering Canvas 2D + HUD + minimap + menu.
+- `game/src/audio.js` — synth suara WebAudio.
 
-- Plain ES modules, no build step, no audio files — `game/src/`:
-  `state.js` (shared state + tuning), `world.js` (city gen + drawing),
-  `vehicles.js` (traffic + driving physics), `police.js` (chase AI),
-  `missions.js` (missions 1–4 + save), `render.js` (camera, lighting,
-  screens), `hud.js` (cash, stars, tracker, minimap), `shots.js`
-  (screenshot presets), `main.js` (bootstrap + game loop).
-- `main.ts` — make.fun entrypoint, serves the game + `/health`.
-- `playtest-cdp.js` — headless Chrome CDP full-loop playtest
-  (win path + busted + wasted, 0 console errors).
-- `capture-shots.js` — captures the 4 required 1280x720 screenshots.
+## Lisensi
 
-## License
-
-MIT — see [LICENSE](LICENSE).
+MIT — lihat [LICENSE](./LICENSE).

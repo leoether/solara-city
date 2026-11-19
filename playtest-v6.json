@@ -1,0 +1,143 @@
+{
+  "game": "SOLARA CITY v6",
+  "at": "2026-11-19T04:01:22.852Z",
+  "passed": 27,
+  "failed": 0,
+  "checks": [
+    {
+      "name": "boot screen",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "start game",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "walk with WASD",
+      "pass": true,
+      "detail": "moved 199px"
+    },
+    {
+      "name": "shoot works (Space)",
+      "pass": true,
+      "detail": "0 -> 1"
+    },
+    {
+      "name": "parked car exists",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "steal car (E) -> wanted 1",
+      "pass": true,
+      "detail": "{\"inCar\":true,\"wanted\":1,\"cops\":2}"
+    },
+    {
+      "name": "drive accelerates",
+      "pass": true,
+      "detail": "speed 455"
+    },
+    {
+      "name": "brake drops skid marks",
+      "pass": true,
+      "detail": "8 marks [t0.2s v318 k5 playing hp100][t0.4s v215 k8 playing hp100][t0.6000000000000001s v28 k8 playing hp88][t0.8s v29 k8 playing hp88]"
+    },
+    {
+      "name": "recovered to driving after brake",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "mission 1 pickup",
+      "pass": true,
+      "detail": "phase=deliver"
+    },
+    {
+      "name": "mission 1 complete +$300",
+      "pass": true,
+      "detail": "{\"cash\":300,\"mi\":1}"
+    },
+    {
+      "name": "mission 2 complete +$500",
+      "pass": true,
+      "detail": "{\"cash\":800,\"mi\":2}"
+    },
+    {
+      "name": "mission 3 sets wanted 3",
+      "pass": true,
+      "detail": "wanted=3"
+    },
+    {
+      "name": "mission 3 complete +$800",
+      "pass": true,
+      "detail": "{\"cash\":1600,\"mi\":3}"
+    },
+    {
+      "name": "gold coupe stolen (E)",
+      "pass": true,
+      "detail": "{\"stolen\":true,\"gold\":true}"
+    },
+    {
+      "name": "mission 4 complete -> LEGEND $3.100",
+      "pass": true,
+      "detail": "{\"cash\":3100,\"mi\":4,\"mode\":\"legend\",\"legend\":true}"
+    },
+    {
+      "name": "save written at LEGEND",
+      "pass": true,
+      "detail": "{\"v\":6,\"cash\":3100,\"missionIndex\":4,\"legend\":true,\"health\":86,\"wanted\":3,\"savedAt\":1795060877031}"
+    },
+    {
+      "name": "boot shows Continue (save exists)",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "continue loads $3.100 + legend",
+      "pass": true,
+      "detail": "{\"cash\":3100,\"mode\":\"playing\",\"legend\":true}"
+    },
+    {
+      "name": "WASTED on death",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "retry after WASTED",
+      "pass": true,
+      "detail": "{\"mode\":\"playing\",\"health\":100}"
+    },
+    {
+      "name": "BUSTED on cop contact",
+      "pass": true,
+      "detail": "[t0.4s playing timer0.4 d0 cops2][t0.8s playing timer0.8 d0 cops2][t1.2000000000000002s busted timer0 d0 cops2]"
+    },
+    {
+      "name": "respawn after BUSTED",
+      "pass": true,
+      "detail": "cash was 0, {\"mode\":\"playing\",\"health\":100}"
+    },
+    {
+      "name": "pause (P)",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "resume (P)",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "0 console errors",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "0 uncaught exceptions",
+      "pass": true,
+      "detail": ""
+    }
+  ]
+}

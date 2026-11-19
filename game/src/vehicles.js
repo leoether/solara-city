@@ -1,201 +1,185 @@
-// SOLARA CITY — vehicles: traffic AI, parked cars, player driving physics
-// (fresh build v5). Car physics: arcade accel/steer, skid marks on hard
-// turns, exhaust smoke, crash shake + sparks, building collision slide.
+// SOLARA CITY — vehicles.js
+// Car physics (arcade: accel, steering, drift, skid), traffic AI,
+// parked-car spawning, collisions with buildings and other cars.
 
-import {
-  WORLD_W, WORLD_H, BLOCK, ROAD, CAR_COLORS, GOLD_COLOR,
-  makeCar, clamp, angleLerp, mulberry32, dist,
-} from './state.js';
-import { isOnRoad, collideBuildings, randomRoadPoint } from './world.js';
+import { WORLD_W, WORLD_H } from './state.js';
+import { ROAD, ROAD_W, collidesWithBuildings, clampToWorld } from './world.js';
 
-const rng = mulberry32(777001);
+let nextCarId = 1;
 
-export function spawnTraffic(S, city, n) {
-  for (let i = 0; i < n; i++) {
-    const p = randomRoadPoint(rng);
-    const angle = (Math.random() < 0.5 ? 0 : Math.PI / 2) + (Math.random() < 0.5 ? 0 : Math.PI);
-    const c = makeCar(p.x, p.y, angle, CAR_COLORS[i % CAR_COLORS.length], { isTraffic: true });
-    c.speed = 60 + rng() * 60;
-    c.cruise = c.speed;
-    S.traffic.push(c);
-  }
+const CAR_COLORS = [
+  '#e74c3c', '#3498db', '#f1c40f', '#9b59b6', '#1abc9c',
+  '#e67e22', '#ecf0f1', '#2c3e50', '#fd79a8', '#00cec9',
+  '#6c5ce7', '#d63031', '#00b894', '#fdcb6e',
+];
+
+export function makeCar(x, y, angle, color, kind) {
+  return {
+    id: nextCarId++,
+    x, y, angle,
+    speed: 0,
+    color: color || CAR_COLORS[Math.floor(Math.random() * CAR_COLORS.length)],
+    kind: kind || 'sedan', // sedan | taxi | truck | coupe | police
+    gold: false,
+    parked: true,
+    w: 46, h: 22,
+    drift: 0,
+    brakeLight: false,
+    headlight: false,
+    honkCooldown: 0,
+  };
 }
 
-export function spawnParked(S, city, n) {
-  let placed = 0;
+export function spawnParkedCars(world, count) {
+  const cars = [];
   let guard = 0;
-  while (placed < n && guard++ < n * 40) {
-    const p = randomRoadPoint(rng);
-    if (dist(p.x, p.y, S.player.x, S.player.y) < 260) continue;
-    const angle = (Math.random() < 0.5 ? 0 : Math.PI / 2) + (Math.random() < 0.5 ? 0 : Math.PI);
-    const c = makeCar(p.x, p.y, angle, CAR_COLORS[Math.floor(rng() * CAR_COLORS.length)], { parked: true });
-    S.cars.push(c);
-    placed++;
-  }
-}
-
-export function spawnGoldCoupe(S, city) {
-  const p = randomRoadPoint(rng);
-  const c = makeCar(p.x, p.y, rng() * Math.PI * 2, GOLD_COLOR, { isGold: true, parked: true });
-  S.goldCoupe = c;
-  S.cars.push(c);
-  return c;
-}
-
-export function nearestParkedCar(S, maxD) {
-  let best = null;
-  let bestD = maxD;
-  for (const c of S.cars) {
-    if (!c.parked) continue;
-    const d = dist(c.x, c.y, S.player.x, S.player.y);
-    if (d < bestD) { bestD = d; best = c; }
-  }
-  return best;
-}
-
-function addSmoke(S, x, y, color, n, spread, life, size) {
-  for (let i = 0; i < n; i++) {
-    S.particles.push({
-      x: x + (Math.random() - 0.5) * spread,
-      y: y + (Math.random() - 0.5) * spread,
-      vx: (Math.random() - 0.5) * 30,
-      vy: (Math.random() - 0.5) * 30,
-      life: life * (0.6 + Math.random() * 0.6),
-      maxLife: life,
-      size: size * (0.7 + Math.random() * 0.6),
-      color, kind: 'smoke',
-    });
-  }
-}
-
-export function addSparks(S, x, y, n) {
-  for (let i = 0; i < n; i++) {
-    const a = Math.random() * Math.PI * 2;
-    const sp = 90 + Math.random() * 220;
-    S.particles.push({
-      x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
-      life: 0.35 + Math.random() * 0.3, maxLife: 0.6,
-      size: 2 + Math.random() * 3, color: Math.random() < 0.5 ? '#ffd166' : '#ff6b35',
-      kind: 'spark',
-    });
-  }
-}
-
-export function updateTraffic(S, dt, city) {
-  for (const c of S.traffic) {
-    // Keep to roads: steer along current axis, turn at intersections.
-    const mx = ((c.x % BLOCK) + BLOCK) % BLOCK;
-    const my = ((c.y % BLOCK) + BLOCK) % BLOCK;
-    const nearX = mx < ROAD / 2 + 14 || mx > ROAD - 14;
-    const nearY = my < ROAD / 2 + 14 || my > ROAD - 14;
-    if (nearX && nearY && Math.random() < dt * 0.7) {
-      // At an intersection: maybe turn 90 degrees.
-      c.angle += (Math.random() < 0.5 ? 1 : -1) * Math.PI / 2;
-      c.angle = Math.round(c.angle / (Math.PI / 2)) * (Math.PI / 2);
+  while (cars.length < count && guard++ < count * 40) {
+    // Parked cars sit on a road centre line, facing along the road,
+    // so driving away from the spot is always clear.
+    const vertical = Math.random() < 0.5;
+    let x, y, angle;
+    if (vertical) {
+      const bx = Math.floor(Math.random() * (WORLD_W / ROAD));
+      x = bx * ROAD + ROAD_W / 2 + (Math.random() - 0.5) * 30;
+      y = 120 + Math.random() * (WORLD_H - 240);
+      angle = Math.random() < 0.5 ? Math.PI / 2 : -Math.PI / 2;
+    } else {
+      const by = Math.floor(Math.random() * (WORLD_H / ROAD));
+      y = by * ROAD + ROAD_W / 2 + (Math.random() - 0.5) * 30;
+      x = 120 + Math.random() * (WORLD_W - 240);
+      angle = Math.random() < 0.5 ? 0 : Math.PI;
     }
-    // Slow down if a car is right ahead.
-    let slow = false;
-    for (const o of S.traffic) {
-      if (o === c) continue;
-      const d = dist(c.x, c.y, o.x, o.y);
-      if (d < 70) {
-        const fa = Math.atan2(o.y - c.y, o.x - c.x);
-        let dd = fa - c.angle;
-        while (dd > Math.PI) dd -= Math.PI * 2;
-        while (dd < -Math.PI) dd += Math.PI * 2;
-        if (Math.abs(dd) < 0.6) { slow = true; break; }
-      }
-    }
-    const target = slow ? 0 : (c.cruise || 90);
-    c.speed += (target - c.speed) * Math.min(1, dt * 1.5);
-    c.x += Math.cos(c.angle) * c.speed * dt;
-    c.y += Math.sin(c.angle) * c.speed * dt;
-    c.x = clamp(c.x, 40, WORLD_W - 40);
-    c.y = clamp(c.y, 40, WORLD_H - 40);
-    // Nudge back onto road if drifted into a block.
-    if (!isOnRoad(c.x, c.y)) {
-      const px = clamp(c.x - Math.cos(c.angle) * 40, 40, WORLD_W - 40);
-      const py = clamp(c.y - Math.sin(c.angle) * 40, 40, WORLD_H - 40);
-      if (isOnRoad(px, py)) { c.x = px; c.y = py; }
-    }
+    const p = clampToWorld(x, y, 60);
+    if (collidesWithBuildings(world, p.x, p.y, 30)) continue;
+    if (cars.some((c) => Math.hypot(c.x - p.x, c.y - p.y) < 90)) continue;
+    const car = makeCar(p.x, p.y, angle, undefined, 'sedan');
+    car.parked = true;
+    cars.push(car);
   }
+  return cars;
 }
 
-// Player driving. Returns events: { crashed, hard } for shake/sound.
-export function updatePlayerCar(S, dt, city, audio, input) {
-  const p = S.player;
-  const car = p.car;
-  if (!car) return null;
-  const up = input.up, down = input.down, left = input.left, right = input.right;
-  const maxSpeed = car.isGold ? 460 : 400;
-  const accel = 300;
-  if (up) car.speed += accel * dt;
-  else if (down) car.speed -= accel * 0.7 * dt;
-  else car.speed -= Math.sign(car.speed) * 130 * dt;
-  if (Math.abs(car.speed) < 6 && !up && !down) car.speed = 0;
-  car.speed = clamp(car.speed, -140, maxSpeed);
-  const steerPower = 2.5 * clamp(Math.abs(car.speed) / 120, 0.25, 1);
-  const turning = (left ? -1 : 0) + (right ? 1 : 0);
-  const prevAngle = car.angle;
-  if (turning !== 0 && Math.abs(car.speed) > 12) {
-    car.angle += turning * steerPower * Math.sign(car.speed) * dt;
-    // Hard turn at speed -> skid marks + dust.
-    if (Math.abs(car.speed) > 220) {
-      const bx = car.x - Math.cos(car.angle) * 20;
-      const by = car.y - Math.sin(car.angle) * 20;
-      S.skids.push({ x: bx, y: by, angle: car.angle, life: 2.2, maxLife: 2.2 });
-      if (S.skids.length > 220) S.skids.shift();
-      addSmoke(S, bx, by, '#cfd8dc', 1, 8, 0.5, 5);
-      S.shake = Math.max(S.shake, 2);
-    }
+export function spawnTrafficCar(world, cars) {
+  const bx = Math.floor(Math.random() * (WORLD_W / 400));
+  const by = Math.floor(Math.random() * (WORLD_H / 400));
+  const horizontal = Math.random() < 0.5;
+  let x, y, angle;
+  if (horizontal) {
+    y = by * 400 + 48 + (Math.random() < 0.5 ? -14 : 14);
+    x = 60 + Math.random() * (WORLD_W - 120);
+    angle = y % 2 === 0 ? 0 : Math.PI;
+    angle = Math.random() < 0.5 ? 0 : Math.PI;
+  } else {
+    x = bx * 400 + 48 + (Math.random() < 0.5 ? -14 : 14);
+    y = 60 + Math.random() * (WORLD_H - 120);
+    angle = Math.random() < 0.5 ? Math.PI / 2 : -Math.PI / 2;
   }
-  car.brakeLight = !!down && car.speed > 40;
-  if (car.brakeLight) {
-    addSmoke(S, car.x - Math.cos(car.angle) * 22, car.y - Math.sin(car.angle) * 22, '#b0bec5', 1, 10, 0.4, 6);
+  const kind = Math.random() < 0.12 ? 'taxi' : (Math.random() < 0.1 ? 'truck' : 'sedan');
+  const car = makeCar(x, y, angle, kind === 'taxi' ? '#f7c948' : undefined, kind);
+  car.parked = false;
+  car.speed = 90 + Math.random() * 70;
+  car.w = kind === 'truck' ? 62 : 46;
+  cars.push(car);
+  return car;
+}
+
+// Arcade driving: throttle accelerates, steering scales with speed,
+// hard turns at speed build drift and drop skid marks (handled by caller).
+export function updateDrivenCar(car, input, dt, world, onCrash) {
+  const maxSpeed = car.gold ? 560 : 470;
+  const maxReverse = 170;
+  const accel = 340;
+  const brake = 620;
+  const drag = 0.55;
+  const prevSpeed = car.speed;
+
+  if (input.up) car.speed += accel * dt;
+  else if (input.down) {
+    if (car.speed > 8) car.speed -= brake * dt;
+    else car.speed -= accel * 0.55 * dt;
+  } else {
+    car.speed -= car.speed * drag * dt;
   }
+  if (car.speed > maxSpeed) car.speed = maxSpeed;
+  if (car.speed < -maxReverse) car.speed = -maxReverse;
+  if (Math.abs(car.speed) < 4 && !input.up && !input.down) car.speed = 0;
+
+  const steerAuthority = Math.min(1, Math.abs(car.speed) / 130);
+  const steerRate = 2.5 * steerAuthority * (car.speed >= 0 ? 1 : -1);
+  let steering = 0;
+  if (input.left) steering -= 1;
+  if (input.right) steering += 1;
+  const hardTurn = steering !== 0 && Math.abs(car.speed) > 300;
+  car.angle += steering * steerRate * dt;
+  car.drift = hardTurn ? Math.min(1, car.drift + dt * 3) : Math.max(0, car.drift - dt * 2.5);
+  car.brakeLight = !!input.down && car.speed > 8;
+
   const nx = car.x + Math.cos(car.angle) * car.speed * dt;
   const ny = car.y + Math.sin(car.angle) * car.speed * dt;
-  const col = collideBuildings(nx, ny, 22, city);
-  let crashed = false;
-  if (col.hit) {
-    if (Math.abs(car.speed) > 130) {
-      crashed = true;
-      addSparks(S, col.x, col.y, 12);
-      S.shake = Math.max(S.shake, Math.min(14, Math.abs(car.speed) / 30));
-      car.health -= Math.abs(car.speed) / 22;
-      car.speed *= -0.25;
-      if (audio) audio.crash(true);
-    } else {
-      car.speed *= 0.4;
+  const hit = collidesWithBuildings(world, nx, ny, 22);
+  if (hit) {
+    // Crash: stop hard, bounce slightly, report impact.
+    const impact = Math.abs(car.speed);
+    car.speed = -car.speed * 0.18;
+    car.x -= Math.cos(car.angle) * 6;
+    car.y -= Math.sin(car.angle) * 6;
+    if (impact > 120 && onCrash) onCrash(impact, car.x, car.y);
+    return { crashed: impact > 120, impact };
+  }
+  const clamped = clampToWorld(nx, ny, 34);
+  car.x = clamped.x;
+  car.y = clamped.y;
+  if ((clamped.x !== nx || clamped.y !== ny) && Math.abs(prevSpeed) > 150 && onCrash) {
+    onCrash(Math.abs(prevSpeed), car.x, car.y);
+  }
+  return { crashed: false, impact: 0, hardTurn, speed: car.speed };
+}
+
+export function updateTrafficCar(car, dt, world, cars) {
+  // Traffic cruises along its lane; slows when a car is ahead, turns at
+  // intersections sometimes. Keeps to roads by construction.
+  const ahead = cars.some((c) => {
+    if (c === car || c.parked) return false;
+    const dx = c.x - car.x;
+    const dy = c.y - car.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist > 120 || dist < 1) return false;
+    const dot = (dx * Math.cos(car.angle) + dy * Math.sin(car.angle)) / dist;
+    return dot > 0.86;
+  });
+  const target = ahead ? 0 : (car.kind === 'truck' ? 95 : 130);
+  car.speed += (target - car.speed) * Math.min(1, dt * 1.4);
+  // Occasional turn at an intersection (near a road centre crossing).
+  const nearX = Math.abs((car.x % 400) - 48) < 14;
+  const nearY = Math.abs((car.y % 400) - 48) < 14;
+  if (nearX && nearY && Math.random() < dt * 0.25) {
+    const turn = (Math.random() < 0.5 ? 1 : -1) * Math.PI / 2;
+    car.angle += turn;
+  }
+  car.x += Math.cos(car.angle) * car.speed * dt;
+  car.y += Math.sin(car.angle) * car.speed * dt;
+  const clamped = clampToWorld(car.x, car.y, 30);
+  if (clamped.x !== car.x || clamped.y !== car.y) {
+    car.angle += Math.PI;
+    car.x = clamped.x;
+    car.y = clamped.y;
+  }
+}
+
+export function carDistance(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+export function nearestParkedCar(cars, x, y, maxDist = 70) {
+  let best = null;
+  let bestD = maxDist;
+  for (const c of cars) {
+    if (!c.parked) continue;
+    const d = Math.hypot(c.x - x, c.y - y);
+    if (d < bestD) {
+      bestD = d;
+      best = c;
     }
   }
-  car.x = clamp(col.x, 30, WORLD_W - 30);
-  car.y = clamp(col.y, 30, WORLD_H - 30);
-  // Bump traffic cars.
-  for (const t of S.traffic) {
-    const d = dist(car.x, car.y, t.x, t.y);
-    if (d < 44 && d > 0.01) {
-      const push = (44 - d) / 2;
-      const ux = (car.x - t.x) / d, uy = (car.y - t.y) / d;
-      t.x -= ux * push; t.y -= uy * push;
-      if (Math.abs(car.speed) > 150) {
-        addSparks(S, t.x, t.y, 8);
-        S.shake = Math.max(S.shake, 6);
-        t.health -= 12;
-        car.speed *= 0.55;
-        if (audio) audio.crash(false);
-      }
-    }
-  }
-  // Exhaust smoke while accelerating.
-  if (up && Math.abs(car.speed) > 30 && Math.random() < dt * 22) {
-    const ex = car.x - Math.cos(car.angle) * 24;
-    const ey = car.y - Math.sin(car.angle) * 24;
-    addSmoke(S, ex, ey, 'rgba(120,120,120,0.8)', 1, 6, 0.7, 7);
-  }
-  // Sync player position to the car.
-  p.x = car.x; p.y = car.y; p.angle = car.angle;
-  p.speed = car.speed;
-  if (audio) audio.engine(clamp(Math.abs(car.speed) / maxSpeed, 0, 1), true);
-  return { crashed, turnRate: Math.abs(car.angle - prevAngle) / Math.max(dt, 0.001) };
+  return best;
 }

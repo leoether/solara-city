@@ -1,1 +1,40 @@
-{"game":"solara-city","shots":[{"file":"screenshots/1-chase.jpg","preset":"1-chase","scene":"Steal a car + police chase at wanted level 1"},{"file":"screenshots/2-reward.jpg","preset":"2-reward","scene":"Mission complete + cash reward shown (+$500)"},{"file":"screenshots/3-legend.jpg","preset":"3-legend","scene":"SOLARA LEGEND status + gold coupe"},{"file":"screenshots/4-shootout.jpg","preset":"4-shootout","scene":"Intense shootout at high wanted level"}],"size":"1280x720","version":"v5"}
+{
+  "game": "SOLARA CITY v6",
+  "at": "2026-11-19T04:01:48.489Z",
+  "width": 1280,
+  "height": 720,
+  "shots": [
+    {
+      "file": "1-chase.jpg",
+      "bytes": 87710,
+      "width": 1280,
+      "height": 720,
+      "quality": 85,
+      "scene": "Curi mobil + kejar-kejaran polisi (wanted 1)"
+    },
+    {
+      "file": "2-reward.jpg",
+      "bytes": 85907,
+      "width": 1280,
+      "height": 720,
+      "quality": 85,
+      "scene": "Misi selesai + reward cash +$300"
+    },
+    {
+      "file": "3-legend.jpg",
+      "bytes": 72128,
+      "width": 1280,
+      "height": 720,
+      "quality": 85,
+      "scene": "SOLARA LEGEND + coupe emas ($3.100)"
+    },
+    {
+      "file": "4-shootout.jpg",
+      "bytes": 89261,
+      "width": 1280,
+      "height": 720,
+      "quality": 85,
+      "scene": "Baku tembak di wanted 3"
+    }
+  ]
+}
